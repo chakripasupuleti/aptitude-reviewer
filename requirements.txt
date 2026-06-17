@@ -1,0 +1,11 @@
+pandas
+openpyxl
+sympy
+requests
+python-dotenv
+anthropic
+fastapi
+uvicorn
+python-multipart
+gspread
+google-auth

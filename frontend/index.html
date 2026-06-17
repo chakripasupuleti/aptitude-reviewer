@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Aptitude Question Reviewer</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: 'Inter', system-ui, sans-serif; }
+  .fade-in { animation: fadeIn .25s ease; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+  .drop-zone.dragging { border-color:#6366f1; background:#eef2ff; }
+  .progress-bar-inner { transition: width .4s ease; }
+  .accordion-body { display:none; }
+  .accordion-body.open { display:block; }
+  .badge-rejected  { background:#fee2e2; color:#b91c1c; }
+  .badge-review    { background:#fef3c7; color:#92400e; }
+  .badge-approved  { background:#dcfce7; color:#166534; }
+  .rubric-error { background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; }
+  .rubric-pass  { background:#dcfce7; color:#166534; border:1px solid #86efac; }
+  .dot-error { background:#ef4444; }
+  .dot-pass  { background:#22c55e; }
+  pre { white-space: pre-wrap; word-break: break-word; }
+  .dash-tab { border-bottom:3px solid transparent; padding:10px 16px; font-size:.85rem; font-weight:600; color:#6b7280; cursor:pointer; transition:all .15s; }
+  .dash-tab.active { border-bottom-color:#6366f1; color:#6366f1; }
+  .dash-tab:hover:not(.active) { color:#374151; }
+  .metric-card { background:#fff; border:1px solid #e5e7eb; border-radius:12px; padding:20px 18px; }
+  .cm-tp { background:#f0fdf4; border:2px solid #86efac; border-radius:10px; padding:16px; text-align:center; }
+  .cm-fp { background:#fef2f2; border:2px solid #fca5a5; border-radius:10px; padding:16px; text-align:center; }
+  .cm-fn { background:#fff7ed; border:2px solid #fed7aa; border-radius:10px; padding:16px; text-align:center; }
+  .cm-tn { background:#f0fdf4; border:2px solid #86efac; border-radius:10px; padding:16px; text-align:center; }
+  .insight-row { display:flex; align-items:flex-start; gap:12px; padding:12px 16px; border-radius:10px; margin-bottom:8px; }
+  .insight-success { background:#f0fdf4; border:1px solid #bbf7d0; }
+  .insight-warning { background:#fffbeb; border:1px solid #fde68a; }
+  .insight-info    { background:#eff6ff; border:1px solid #bfdbfe; }
+  .section-header { font-size:.65rem; font-weight:700; letter-spacing:.08em; color:#9ca3af; text-transform:uppercase; margin-bottom:12px; }
+</style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+
+<!-- ═══════════════════════════════════════════════════════════ UPLOAD VIEW -->
+<div id="view-upload" class="min-h-screen flex flex-col fade-in">
+  <div class="flex justify-end px-6 py-4">
+    <button onclick="openDashboard()"
+      class="flex items-center gap-2 text-sm text-indigo-600 border border-indigo-200 rounded-lg px-4 py-2 hover:bg-indigo-50 transition-colors font-medium">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+      </svg>
+      Dashboard
+    </button>
+  </div>
+  <div class="flex-1 flex flex-col items-center justify-center px-4 pb-12">
+    <h1 class="text-4xl font-bold text-gray-900 mb-2 text-center">Upload Exam Questions</h1>
+    <p class="text-gray-500 mb-8 text-center">Upload your Excel file and review every question for content, explanation, option, and key issues.</p>
+    <div class="bg-white rounded-2xl shadow-sm p-8 w-full max-w-xl">
+      <div id="drop-zone" class="drop-zone border-2 border-dashed border-gray-300 rounded-xl p-10 text-center cursor-pointer transition-colors hover:border-indigo-400 hover:bg-indigo-50" onclick="document.getElementById('file-input').click()">
+        <div class="flex justify-center mb-4">
+          <div class="w-14 h-14 rounded-full bg-gray-100 flex items-center justify-center">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-7 w-7 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+            </svg>
+          </div>
+        </div>
+        <p id="drop-label" class="font-semibold text-gray-700 text-lg">Drop your Excel file here</p>
+        <p class="text-gray-400 text-sm mt-1">or click to browse &mdash; .xlsx or .xls, max 10 MB</p>
+      </div>
+      <input type="file" id="file-input" accept=".xlsx,.xls" class="hidden" />
+      <div class="flex items-center justify-between mt-5">
+        <a href="/api/template" download class="flex items-center gap-2 text-sm text-gray-600 border border-gray-300 rounded-lg px-4 py-2.5 hover:bg-gray-50 transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+          </svg>
+          Download Template
+        </a>
+        <button id="start-btn" class="bg-gray-400 text-white font-semibold px-6 py-2.5 rounded-lg transition-colors disabled:opacity-50 cursor-not-allowed" disabled onclick="startReview()">
+          Start Review
+        </button>
+      </div>
+      <p id="upload-error" class="mt-3 text-red-500 text-sm hidden"></p>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════════════════════════════════════════════════════ PROCESSING VIEW -->
+<div id="view-processing" class="hidden min-h-screen flex flex-col items-center justify-center px-4 py-12 fade-in">
+  <h1 class="text-4xl font-bold text-gray-900 mb-2 text-center">Reviewing Questions</h1>
+  <p class="text-gray-500 mb-8 text-center">The reviewer is checking each question for content, explanation, option, and key issues.</p>
+  <div class="bg-white rounded-2xl shadow-sm p-8 w-full max-w-xl">
+    <div class="flex justify-between items-center mb-2">
+      <span id="proc-current" class="text-gray-600 font-medium">Starting…</span>
+      <span id="proc-pct" class="text-gray-400 text-sm">0%</span>
+    </div>
+    <div class="w-full bg-gray-100 rounded-full h-2.5 mb-6 overflow-hidden">
+      <div id="proc-bar" class="progress-bar-inner h-2.5 rounded-full bg-indigo-500" style="width:0%"></div>
+    </div>
+    <div class="grid grid-cols-3 gap-4 mb-6">
+      <div class="bg-gray-50 rounded-xl p-4 text-center"><p id="proc-done" class="text-3xl font-bold text-gray-800">0</p><p id="proc-total-label" class="text-gray-400 text-sm mt-1">of — done</p></div>
+      <div class="bg-gray-50 rounded-xl p-4 text-center"><p id="proc-elapsed" class="text-3xl font-bold text-gray-800">0s</p><p class="text-gray-400 text-sm mt-1">elapsed</p></div>
+      <div class="bg-gray-50 rounded-xl p-4 text-center"><p id="proc-remaining" class="text-3xl font-bold text-gray-800">-</p><p class="text-gray-400 text-sm mt-1">remaining</p></div>
+    </div>
+    <div class="flex justify-center gap-2">
+      <div class="w-2.5 h-2.5 rounded-full bg-indigo-400 animate-bounce" style="animation-delay:0s"></div>
+      <div class="w-2.5 h-2.5 rounded-full bg-indigo-400 animate-bounce" style="animation-delay:.15s"></div>
+      <div class="w-2.5 h-2.5 rounded-full bg-indigo-400 animate-bounce" style="animation-delay:.3s"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════════════════════ RESULTS VIEW -->
+<div id="view-results" class="hidden min-h-screen fade-in">
+  <div class="bg-white border-b border-gray-200 px-6 py-5">
+    <div class="max-w-5xl mx-auto flex items-center justify-between flex-wrap gap-3">
+      <div>
+        <h1 class="text-2xl font-bold text-gray-900">Review Results</h1>
+        <p id="results-job-label" class="text-gray-400 text-sm mt-0.5"></p>
+      </div>
+      <div class="flex gap-3">
+        <button onclick="openDashboard()" class="flex items-center gap-2 text-sm text-indigo-600 border border-indigo-200 rounded-lg px-4 py-2 hover:bg-indigo-50 transition-colors font-medium">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+          </svg>
+          Dashboard
+        </button>
+        <button onclick="newUpload()" class="text-sm text-gray-600 border border-gray-300 rounded-lg px-4 py-2 hover:bg-gray-50 transition-colors">New upload</button>
+        <button id="download-btn" onclick="downloadExcel()" class="flex items-center gap-2 text-sm bg-gray-900 text-white rounded-lg px-4 py-2 hover:bg-gray-700 transition-colors">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+          </svg>
+          Download Excel
+        </button>
+      </div>
+    </div>
+  </div>
+  <div class="max-w-5xl mx-auto px-4 py-6">
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+      <div class="bg-white rounded-xl p-5 shadow-sm border border-gray-100"><p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Total</p><p id="stat-total" class="text-3xl font-bold text-gray-800">-</p><p class="text-xs text-gray-400 mt-1">100% of total</p></div>
+      <div class="bg-white rounded-xl p-5 shadow-sm border border-green-100"><p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Approved</p><p id="stat-approved" class="text-3xl font-bold text-green-600">-</p><p id="stat-approved-pct" class="text-xs text-gray-400 mt-1">-</p></div>
+      <div class="bg-white rounded-xl p-5 shadow-sm border border-yellow-100"><p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Needs Review</p><p id="stat-review" class="text-3xl font-bold text-yellow-600">-</p><p id="stat-review-pct" class="text-xs text-gray-400 mt-1">-</p></div>
+      <div class="bg-white rounded-xl p-5 shadow-sm border border-red-100"><p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Rejected</p><p id="stat-rejected" class="text-3xl font-bold text-red-600">-</p><p id="stat-rejected-pct" class="text-xs text-gray-400 mt-1">-</p></div>
+    </div>
+    <div id="common-issues-box" class="bg-white rounded-xl p-5 shadow-sm border border-gray-100 mb-6 hidden">
+      <p class="text-sm font-semibold text-gray-500 mb-3">Most common issues</p>
+      <div id="common-issues-tags" class="flex flex-wrap gap-2"></div>
+    </div>
+    <div class="flex items-center justify-between mb-4">
+      <p id="q-count-label" class="text-gray-600 font-medium"></p>
+      <div class="flex gap-2">
+        <button onclick="filterResults('all')" id="filter-all" class="filter-btn text-sm px-3 py-1.5 rounded-lg bg-gray-900 text-white font-medium">All</button>
+        <button onclick="filterResults('approved')" id="filter-approved" class="filter-btn text-sm px-3 py-1.5 rounded-lg bg-white text-gray-600 border border-gray-200 font-medium hover:bg-gray-50">Approved</button>
+        <button onclick="filterResults('review')" id="filter-review" class="filter-btn text-sm px-3 py-1.5 rounded-lg bg-white text-gray-600 border border-gray-200 font-medium hover:bg-gray-50">Needs Review</button>
+        <button onclick="filterResults('rejected')" id="filter-rejected" class="filter-btn text-sm px-3 py-1.5 rounded-lg bg-white text-gray-600 border border-gray-200 font-medium hover:bg-gray-50">Rejected</button>
+      </div>
+    </div>
+    <div id="question-list" class="space-y-3"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════════ DASHBOARD VIEW -->
+<div id="view-dashboard" class="hidden min-h-screen fade-in">
+  <!-- Dashboard header -->
+  <div class="bg-white border-b border-gray-200 px-6 py-4 sticky top-0 z-10">
+    <div class="max-w-6xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-4">
+        <button onclick="showView('upload')" class="text-sm text-gray-500 hover:text-gray-800 flex items-center gap-1">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+          Back
+        </button>
+        <h1 class="text-xl font-bold text-gray-900">Accuracy Dashboard</h1>
+        <span id="dash-run-count" class="text-xs text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full"></span>
+      </div>
+      <button onclick="openDashboard()" title="Refresh data" class="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-800 border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-50 transition-colors">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        Refresh
+      </button>
+    </div>
+  </div>
+
+  <div class="max-w-6xl mx-auto px-4 py-6">
+    <!-- Loading spinner -->
+    <div id="dash-loading" class="flex justify-center py-16">
+      <div class="flex gap-2">
+        <div class="w-2.5 h-2.5 rounded-full bg-indigo-400 animate-bounce" style="animation-delay:0s"></div>
+        <div class="w-2.5 h-2.5 rounded-full bg-indigo-400 animate-bounce" style="animation-delay:.15s"></div>
+        <div class="w-2.5 h-2.5 rounded-full bg-indigo-400 animate-bounce" style="animation-delay:.3s"></div>
+      </div>
+    </div>
+
+    <!-- Overview content (no tabs — always visible after load) -->
+    <div id="dash-overview" class="space-y-6"></div>
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────────
+const state = {
+  view: 'upload',
+  jobId: null,
+  pollTimer: null,
+  results: null,
+  activeFilter: 'all',
+  expandedRows: new Set(),
+  selectedFile: null,
+  dashboardData: null,
+  feedback: {},  // { sno: { verdict: 'approve'|'reject', remarks: '', submitted: bool } }
+};
+
+// ── View switching ─────────────────────────────────────────────────────────────
+function showView(name) {
+  ['upload','processing','results','dashboard'].forEach(v => {
+    const el = document.getElementById(`view-${v}`);
+    el.classList.toggle('hidden', v !== name);
+    if (v === name) el.classList.add('fade-in');
+  });
+  state.view = name;
+}
+
+// ── File handling ──────────────────────────────────────────────────────────────
+const dropZone = document.getElementById('drop-zone');
+const fileInput = document.getElementById('file-input');
+const dropLabel = document.getElementById('drop-label');
+const startBtn  = document.getElementById('start-btn');
+
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('dragging'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragging'));
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('dragging'); if (e.dataTransfer.files.length) setFile(e.dataTransfer.files[0]); });
+fileInput.addEventListener('change', () => { if (fileInput.files.length) setFile(fileInput.files[0]); });
+
+function setFile(file) {
+  if (!['.xlsx','.xls'].some(e => file.name.toLowerCase().endsWith(e))) { showUploadError('Only .xlsx or .xls files are supported.'); return; }
+  if (file.size > 10*1024*1024) { showUploadError('File exceeds the 10 MB limit.'); return; }
+  state.selectedFile = file;
+  dropLabel.textContent = file.name;
+  startBtn.disabled = false;
+  startBtn.classList.replace('bg-gray-400','bg-indigo-600');
+  startBtn.classList.remove('cursor-not-allowed');
+  startBtn.classList.add('hover:bg-indigo-700');
+  hideUploadError();
+}
+function showUploadError(msg) { const el=document.getElementById('upload-error'); el.textContent=msg; el.classList.remove('hidden'); }
+function hideUploadError() { document.getElementById('upload-error').classList.add('hidden'); }
+
+// ── Start review ───────────────────────────────────────────────────────────────
+async function startReview() {
+  if (!state.selectedFile) return;
+  const formData = new FormData();
+  formData.append('file', state.selectedFile);
+  formData.append('use_llm', 'true');
+  startBtn.disabled = true;
+  startBtn.textContent = 'Uploading…';
+  try {
+    const res = await fetch('/api/jobs', { method:'POST', body:formData });
+    if (!res.ok) { const err = await res.json().catch(()=>({detail:'Upload failed'})); throw new Error(err.detail||'Upload failed'); }
+    const { job_id } = await res.json();
+    state.jobId = job_id;
+    document.getElementById('results-job-label').textContent = `Job: ${job_id}…`;
+    showView('processing');
+    state.pollTimer = setInterval(pollStatus, 1000);
+  } catch (e) { showUploadError(e.message); startBtn.disabled=false; startBtn.textContent='Start Review'; }
+}
+
+async function pollStatus() {
+  try {
+    const res = await fetch(`/api/jobs/${state.jobId}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const p = data.total > 0 ? Math.round(data.done/data.total*100) : 0;
+    document.getElementById('proc-current').textContent = data.current ? `Reviewing ${data.current}` : 'Starting…';
+    document.getElementById('proc-pct').textContent = `${p}%`;
+    document.getElementById('proc-bar').style.width = `${p}%`;
+    document.getElementById('proc-done').textContent = data.done;
+    document.getElementById('proc-total-label').textContent = `of ${data.total||'—'} done`;
+    document.getElementById('proc-elapsed').textContent = fmtTime(data.elapsed);
+    document.getElementById('proc-remaining').textContent = data.remaining!=null ? fmtTime(data.remaining) : '—';
+    if (data.status==='done'||data.status==='error') {
+      clearInterval(state.pollTimer);
+      if (data.status==='error') { showView('upload'); showUploadError(`Review failed: ${data.error}`); return; }
+      await fetchAndShowResults();
+    }
+  } catch (_) {}
+}
+function fmtTime(s) { if(s==null)return'—'; if(s<60)return`${s}s`; return`${Math.floor(s/60)}m ${s%60}s`; }
+
+async function fetchAndShowResults() {
+  const res = await fetch(`/api/jobs/${state.jobId}/results`);
+  if (!res.ok) { showView('upload'); showUploadError('Failed to fetch results.'); return; }
+  state.results = await res.json();
+  renderResults();
+  showView('results');
+}
+
+function renderResults() {
+  const d = state.results, total = d.total;
+  document.getElementById('stat-total').textContent = total;
+  document.getElementById('stat-approved').textContent = d.approved;
+  document.getElementById('stat-approved-pct').textContent = `${pct(d.approved,total)}% of total`;
+  document.getElementById('stat-review').textContent = d.needs_review;
+  document.getElementById('stat-review-pct').textContent = `${pct(d.needs_review,total)}% of total`;
+  document.getElementById('stat-rejected').textContent = d.rejected;
+  document.getElementById('stat-rejected-pct').textContent = `${pct(d.rejected,total)}% of total`;
+  if (d.common_issues.length) {
+    document.getElementById('common-issues-box').classList.remove('hidden');
+    document.getElementById('common-issues-tags').innerHTML = d.common_issues.map(i =>
+      `<span class="text-sm px-3 py-1 rounded-full border border-orange-200 bg-orange-50 text-orange-700">${escHtml(i.type)} <span class="font-semibold">${i.count}</span></span>`
+    ).join('');
+  }
+  renderQuestionList();
+}
+
+function pct(n, total) { return total>0 ? Math.round(n/total*100) : 0; }
+
+function filterResults(filter) {
+  state.activeFilter = filter;
+  ['all','approved','review','rejected'].forEach(f => {
+    const btn = document.getElementById(`filter-${f}`);
+    btn.className = f===filter
+      ? 'filter-btn text-sm px-3 py-1.5 rounded-lg bg-gray-900 text-white font-medium'
+      : 'filter-btn text-sm px-3 py-1.5 rounded-lg bg-white text-gray-600 border border-gray-200 font-medium hover:bg-gray-50';
+  });
+  renderQuestionList();
+}
+
+function renderQuestionList() {
+  const rows = (state.results?.rows||[]).filter(r => {
+    const s = r.agent_status.toLowerCase();
+    if (state.activeFilter==='approved') return s.includes('approved');
+    if (state.activeFilter==='review') return s==='needs review';
+    if (state.activeFilter==='rejected') return s==='rejected';
+    return true;
+  });
+  document.getElementById('q-count-label').textContent = `${rows.length} question${rows.length!==1?'s':''}`;
+  document.getElementById('question-list').innerHTML = rows.map(buildQuestionCard).join('');
+}
+
+// ── Question card ──────────────────────────────────────────────────────────────
+function statusBadge(status) {
+  const s = status.toLowerCase();
+  if (s==='rejected') return `<span class="badge-rejected text-xs font-semibold px-3 py-1 rounded-full">Rejected</span>`;
+  if (s==='needs review') return `<span class="badge-review text-xs font-semibold px-3 py-1 rounded-full">Needs Review</span>`;
+  return `<span class="badge-approved text-xs font-semibold px-3 py-1 rounded-full">Approved</span>`;
+}
+function buildQuestionCard(r) {
+  const isOpen = state.expandedRows.has(r.sno);
+  const hasIssue = r.agent_status.toLowerCase()!=='approved';
+  return `<div class="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
+  <button class="w-full flex items-center justify-between px-6 py-4 text-left hover:bg-gray-50 transition-colors" onclick="toggleCard('${escAttr(r.sno)}')">
+    <div class="flex items-center gap-3 min-w-0">
+      <span class="text-sm font-bold text-gray-400 shrink-0">${escHtml(r.display_sno || r.sno)}</span>
+      <span class="text-xs text-gray-400 bg-gray-100 rounded px-1.5 py-0.5 shrink-0">MCQ</span>
+      <span class="text-sm text-gray-700 truncate">${escHtml(r.question.substring(0,100))}${r.question.length>100?'…':''}</span>
+    </div>
+    <div class="flex items-center gap-2 shrink-0 ml-3">
+      ${statusBadge(r.agent_status)}
+      ${state.feedback[r.sno]?.submitted ? `<span id="fb-dot-${escAttr(r.sno)}" class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${state.feedback[r.sno].verdict==='approve'?'#22c55e':'#ef4444'}" title="Human: ${state.feedback[r.sno].verdict==='approve'?'Approved':'Rejected'}"></span>` : `<span id="fb-dot-${escAttr(r.sno)}" class="w-2.5 h-2.5 rounded-full shrink-0 bg-gray-200" title="No human review yet"></span>`}
+      <svg class="h-4 w-4 text-gray-400 transform transition-transform ${isOpen?'rotate-180':''}" id="chevron-${escAttr(r.sno)}" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+    </div>
+  </button>
+  <div id="acc-${r.sno}" class="accordion-body border-t border-gray-100 ${isOpen?'open':''}">
+    <div class="px-6 py-5 space-y-5">
+      <div>
+        <p class="section-header mb-3">Changes</p>
+        <div class="grid grid-cols-2 gap-4">
+          <div><p class="text-xs text-gray-400 mb-2">ORIGINAL QUESTION</p>
+            <div class="${hasIssue?'bg-red-50 border border-red-100':'bg-gray-50 border border-gray-100'} rounded-lg p-3">
+              <p class="${hasIssue?'line-through text-red-500':'text-gray-700'} text-sm">${escHtml(r.question)}</p></div></div>
+          <div><p class="text-xs text-gray-400 mb-2">CORRECTED QUESTION</p>
+            <div class="bg-green-50 border border-green-100 rounded-lg p-3"><p class="text-gray-700 text-sm">${escHtml(r.question)}</p></div></div>
+        </div>
+        <div class="mt-3 grid grid-cols-2 gap-4">
+          <div><p class="text-xs text-gray-400 mb-2">ORIGINAL OPTIONS</p><p class="text-sm text-gray-600">${[r.option_a,r.option_b,r.option_c,r.option_d].map(escHtml).join('  ')}</p></div>
+          <div><p class="text-xs text-gray-400 mb-2">CORRECTED OPTIONS</p><p class="text-sm text-gray-600">${[r.option_a,r.option_b,r.option_c,r.option_d].map(escHtml).join('  ')}</p></div>
+        </div>
+        ${(r.reviewed_key||r.key)?`<div class="mt-3 bg-indigo-50 border border-indigo-200 rounded-lg px-4 py-2"><span class="text-xs font-bold text-indigo-700 uppercase tracking-wide">Correct Answer — ${escHtml(r.reviewed_key||r.key)}${r.reviewed_key&&r.reviewed_key!==r.key?` <span class="line-through text-indigo-300">(was ${escHtml(r.key)})</span>`:''}</span></div>`:''}
+        <div class="mt-3 grid grid-cols-2 gap-4">
+          <div><p class="text-xs text-gray-400 mb-2">ORIGINAL EXPLANATION</p>
+            <div class="${hasIssue?'bg-red-50 border border-red-100':'bg-gray-50 border border-gray-100'} rounded-lg p-3 max-h-40 overflow-y-auto">
+              <pre class="${hasIssue?'line-through text-red-500':'text-gray-700'} text-xs leading-relaxed">${escHtml(r.explanation)}</pre></div></div>
+          <div><p class="text-xs text-gray-400 mb-2">CORRECTED EXPLANATION</p>
+            <div class="bg-green-50 border border-green-100 rounded-lg p-3 max-h-40 overflow-y-auto">
+              ${r.suggested_corrections?`<pre class="text-xs text-gray-700 leading-relaxed">${escHtml(r.suggested_corrections)}</pre>`:`<p class="text-xs text-gray-400 italic">${hasIssue?'Review remarks below.':'No corrections needed.'}</p>`}</div></div>
+        </div>
+      </div>
+      ${buildRubricSection(r.rubric)}
+      ${r.remarks?`<div><p class="section-header mb-3">Remarks</p><div class="bg-yellow-50 border border-yellow-100 rounded-lg p-4"><pre class="text-sm text-gray-700 leading-relaxed whitespace-pre-wrap">${escHtml(r.remarks)}</pre></div></div>`:''}
+      ${r.llm_status&&r.llm_status!=='Not Run'?`<div class="flex items-center gap-2 text-xs text-gray-400"><span class="w-2 h-2 rounded-full ${r.llm_status==='Success'?'bg-green-400':'bg-red-400'}"></span>LLM: ${escHtml(r.llm_status)}</div>`:''}
+      ${renderFeedbackSection(r.sno)}
+    </div>
+  </div>
+</div>`;
+}
+function buildRubricSection(rubric) {
+  if (!rubric) return '';
+  return `<div><p class="section-header mb-3">Rubric Scores</p><div class="flex flex-wrap gap-2">${
+    Object.entries(rubric).map(([cat,val]) => {
+      const e = val==='Error';
+      return `<span class="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full ${e?'rubric-error':'rubric-pass'}"><span class="w-1.5 h-1.5 rounded-full ${e?'dot-error':'dot-pass'}"></span>${escHtml(cat)}: ${val}</span>`;
+    }).join('')
+  }</div></div>`;
+}
+function toggleCard(sno) {
+  const body=document.getElementById(`acc-${sno}`), ch=document.getElementById(`chevron-${sno}`);
+  if (body.classList.contains('open')) { body.classList.remove('open'); ch.classList.remove('rotate-180'); state.expandedRows.delete(sno); }
+  else { body.classList.add('open'); ch.classList.add('rotate-180'); state.expandedRows.add(sno); }
+}
+
+// ══════════════════════════════════════════════════════════════ FEEDBACK ═════
+
+function renderFeedbackSection(sno) {
+  const fb = state.feedback[sno];
+  const submitted = fb?.submitted;
+  const verdict   = fb?.verdict;
+  const remarks   = fb?.remarks || '';
+
+  const approveActive = submitted && verdict === 'approve';
+  const rejectActive  = submitted && verdict === 'reject';
+
+  return `<div class="border-t border-gray-100 pt-4 mt-1" id="fb-section-${escAttr(sno)}">
+    <p class="section-header mb-3">Human Review</p>
+    <p class="text-xs text-gray-500 mb-3">Was the agent's assessment correct for this question?</p>
+    <div class="flex items-center gap-3 mb-3">
+      <button onclick="selectFeedbackVerdict('${escAttr(sno)}','approve')"
+        id="fb-approve-${escAttr(sno)}"
+        class="flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-lg border transition-colors
+               ${approveActive ? 'bg-green-500 border-green-500 text-white' : 'bg-white border-gray-300 text-gray-600 hover:border-green-400 hover:text-green-700'}">
+        ✓ Approve
+      </button>
+      <button onclick="selectFeedbackVerdict('${escAttr(sno)}','reject')"
+        id="fb-reject-${escAttr(sno)}"
+        class="flex items-center gap-1.5 text-sm font-semibold px-4 py-2 rounded-lg border transition-colors
+               ${rejectActive ? 'bg-red-500 border-red-500 text-white' : 'bg-white border-gray-300 text-gray-600 hover:border-red-400 hover:text-red-700'}">
+        ✗ Reject
+      </button>
+    </div>
+    <div id="fb-remarks-wrap-${escAttr(sno)}" class="${(fb && verdict==='reject') ? '' : 'hidden'}">
+      <textarea id="fb-remarks-${escAttr(sno)}"
+        class="w-full text-sm border border-gray-200 rounded-lg p-3 resize-none focus:outline-none focus:border-red-400"
+        rows="2" placeholder="Describe what the agent got wrong…">${escHtml(remarks)}</textarea>
+    </div>
+    <div class="flex items-center gap-3 mt-2">
+      <button onclick="submitFeedback('${escAttr(sno)}')"
+        id="fb-submit-${escAttr(sno)}"
+        class="${fb?.verdict ? '' : 'hidden'} text-sm font-semibold bg-gray-900 text-white px-4 py-2 rounded-lg hover:bg-gray-700 transition-colors">
+        ${submitted ? 'Update' : 'Submit'}
+      </button>
+      <span id="fb-confirm-${escAttr(sno)}" class="text-xs text-green-600 font-medium ${submitted ? '' : 'hidden'}">
+        ✓ Feedback saved
+      </span>
+    </div>
+  </div>`;
+}
+
+function selectFeedbackVerdict(sno, verdict) {
+  if (!state.feedback[sno]) state.feedback[sno] = { verdict: null, remarks: '', submitted: false };
+  state.feedback[sno].verdict = verdict;
+
+  // Update button styles
+  const aBtn = document.getElementById(`fb-approve-${sno}`);
+  const rBtn = document.getElementById(`fb-reject-${sno}`);
+  if (aBtn) {
+    aBtn.className = aBtn.className.replace(/bg-green-500 border-green-500 text-white|bg-white border-gray-300 text-gray-600 hover:border-green-400 hover:text-green-700/g, '').trim();
+    aBtn.className += verdict === 'approve'
+      ? ' bg-green-500 border-green-500 text-white'
+      : ' bg-white border-gray-300 text-gray-600 hover:border-green-400 hover:text-green-700';
+  }
+  if (rBtn) {
+    rBtn.className = rBtn.className.replace(/bg-red-500 border-red-500 text-white|bg-white border-gray-300 text-gray-600 hover:border-red-400 hover:text-red-700/g, '').trim();
+    rBtn.className += verdict === 'reject'
+      ? ' bg-red-500 border-red-500 text-white'
+      : ' bg-white border-gray-300 text-gray-600 hover:border-red-400 hover:text-red-700';
+  }
+
+  // Show/hide remarks textarea
+  const wrap = document.getElementById(`fb-remarks-wrap-${sno}`);
+  if (wrap) wrap.classList.toggle('hidden', verdict !== 'reject');
+
+  // Show submit button
+  const submitBtn = document.getElementById(`fb-submit-${sno}`);
+  if (submitBtn) submitBtn.classList.remove('hidden');
+
+  // Hide old confirmation
+  const confirm = document.getElementById(`fb-confirm-${sno}`);
+  if (confirm) confirm.classList.add('hidden');
+}
+
+async function submitFeedback(sno) {
+  const fb = state.feedback[sno];
+  if (!fb || !fb.verdict) return;
+
+  const remarksEl = document.getElementById(`fb-remarks-${sno}`);
+  fb.remarks = remarksEl ? remarksEl.value.trim() : '';
+
+  const submitBtn = document.getElementById(`fb-submit-${sno}`);
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Saving…'; }
+
+  try {
+    const res = await fetch(`/api/jobs/${state.jobId}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sno, verdict: fb.verdict, remarks: fb.remarks }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+
+    fb.submitted = true;
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Update'; }
+
+    const confirm = document.getElementById(`fb-confirm-${sno}`);
+    if (confirm) confirm.classList.remove('hidden');
+
+    // Update indicator dot in card header
+    const dot = document.getElementById(`fb-dot-${sno}`);
+    if (dot) {
+      dot.style.background = fb.verdict === 'approve' ? '#22c55e' : '#ef4444';
+      dot.title = `Human: ${fb.verdict === 'approve' ? 'Approved' : 'Rejected'}`;
+      dot.className = 'w-2.5 h-2.5 rounded-full shrink-0';
+    }
+  } catch (e) {
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Retry'; }
+    alert(`Failed to save feedback: ${e.message}`);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════ DASHBOARD ════
+
+async function openDashboard() {
+  showView('dashboard');
+  document.getElementById('dash-loading').classList.remove('hidden');
+  document.getElementById('dash-overview').innerHTML = '';
+  document.getElementById('dash-run-count').textContent = '';
+
+  try {
+    const res = await fetch('/api/dashboard');
+    if (!res.ok) throw new Error('Failed to load dashboard data');
+    state.dashboardData = await res.json();
+    renderDashboard();
+  } catch(e) {
+    document.getElementById('dash-loading').innerHTML =
+      `<div class="text-red-500 text-sm text-center py-8">${escHtml(e.message)}</div>`;
+  }
+}
+
+function renderDashboard() {
+  document.getElementById('dash-loading').classList.add('hidden');
+  const data = state.dashboardData;
+  const runs = data.runs || [];
+  document.getElementById('dash-run-count').textContent = `${runs.length} run${runs.length!==1?'s':''}`;
+  renderOverviewTab(runs, data.top_errors || []);
+}
+
+// ── OVERVIEW ───────────────────────────────────────────────────────────────────
+function renderOverviewTab(runs, topErrors) {
+  const el = document.getElementById('dash-overview');
+  if (!runs.length) {
+    el.innerHTML = `<div class="text-center py-16 text-gray-400">No run history found. Complete a review to see data here.</div>`;
+    return;
+  }
+
+  // Aggregate across all runs
+  const agg = { total:0, approved:0, needs_review:0, rejected:0, TP:0, FP:0, FN:0, TN:0, flagged_for_revision:0, correctly_rejected:0, has_gt:false };
+  let modelCounts = {};
+  runs.forEach(r => {
+    agg.total += (r.total||0);
+    agg.approved += (r.approved||0);
+    agg.needs_review += (r.needs_review||0);
+    agg.rejected += (r.rejected||0);
+    const m = r.metrics || {};
+    if (m.has_ground_truth) {
+      agg.has_gt = true;
+      agg.TP += (m.TP||0); agg.FP += (m.FP||0); agg.FN += (m.FN||0); agg.TN += (m.TN||0);
+      agg.flagged_for_revision += (m.flagged_for_revision||0);
+      agg.correctly_rejected += (m.correctly_rejected||0);
+    }
+    const model = r.model || 'V1 only';
+    if (!modelCounts[model]) modelCounts[model] = {runs:0,total:0,approved:0,flagged:0};
+    modelCounts[model].runs++;
+    modelCounts[model].total += (r.total||0);
+    modelCounts[model].approved += (r.approved||0);
+    modelCounts[model].flagged += (r.needs_review||0) + (r.rejected||0);
+  });
+
+  const precision = agg.TP+agg.FP>0 ? roundPct(agg.TP/(agg.TP+agg.FP)) : null;
+  const recall    = agg.TP+agg.FN>0 ? roundPct(agg.TP/(agg.TP+agg.FN)) : null;
+  const f1        = precision&&recall ? Math.round(2*precision*recall/(precision+recall))/100 : null;
+  const gt_total  = agg.TP+agg.FP+agg.FN+agg.TN;
+  const accuracy  = gt_total>0 ? roundPct((agg.TP+agg.TN)/gt_total) : null;
+
+  el.innerHTML = `
+    <!-- Summary stat cards -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      ${statCard('Total Runs',         runs.length,                       '#6366f1', `across ${runs.length} file${runs.length!==1?'s':''}`)}
+      ${statCard('Questions Reviewed', agg.total,                         '#374151', `${runs.length} run${runs.length!==1?'s':''} total`)}
+      ${statCard('Approved',           agg.approved,                      '#16a34a', pctStr(agg.approved, agg.total))}
+      ${statCard('Flagged / Rejected', agg.needs_review + agg.rejected,   '#dc2626', pctStr(agg.needs_review+agg.rejected, agg.total))}
+    </div>
+
+    <!-- Core Efficiency Metrics with gauges -->
+    ${agg.has_gt ? `
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+      <p class="section-header mb-4">Core Efficiency Metrics</p>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        ${gaugeCard('Precision', precision, '#6366f1', precision!=null&&precision>=99.9?'Zero false flags':`${agg.FP} false flags`)}
+        ${gaugeCard('Recall',    recall,    '#f59e0b', recall!=null&&recall<50?`${agg.FN} issues missed`:'Issues caught')}
+        ${gaugeCard('F1 Score',  f1!=null?Math.round(f1*100):null, '#10b981', 'Harmonic mean', f1!=null?f1.toFixed(2):null)}
+        ${gaugeCard('Accuracy',  accuracy,  '#3b82f6', gt_total>0?`${agg.TP+agg.TN} of ${gt_total} GT rows correct`:'')}
+      </div>
+    </div>` : ''}
+
+    <!-- Status donut + Question Outcomes SVG bars -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      ${buildDonutPanel(agg.approved, agg.needs_review, agg.rejected)}
+      ${agg.has_gt ? buildOutcomesPanel(agg) : buildDistributionPanel(agg)}
+    </div>
+
+    <!-- Confusion Matrix + Diagnostic Insights -->
+    ${agg.has_gt ? `
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      ${buildConfusionPanel(agg)}
+      ${buildInsightsPanel(precision, recall, agg.FP, agg.FN)}
+    </div>` : ''}
+
+    <!-- Error Type SVG bar chart -->
+    ${topErrors.length ? buildErrorChart(topErrors) : ''}
+  `;
+}
+
+function statCard(label, value, color, sub) {
+  return `<div class="metric-card">
+    <p class="section-header mb-1">${escHtml(label)}</p>
+    <p class="text-3xl font-bold mt-1" style="color:${color}">${escHtml(String(value))}</p>
+    <p class="text-xs text-gray-400 mt-1">${escHtml(sub)}</p>
+  </div>`;
+}
+function gaugeCard(label, pct, color, sub, displayVal=null) {
+  // SVG semicircle gauge. Arc: M 12,60 A 48,48 0 0,1 108,60 → length = π×48 ≈ 150.8
+  const arcLen = 150.8;
+  const filled = pct != null ? Math.max(0, Math.min(pct / 100 * arcLen, arcLen)) : 0;
+  const display = displayVal != null ? displayVal : (pct != null ? pct + '%' : '—');
+  const textFill = pct != null ? color : '#9ca3af';
+  return `<div class="metric-card flex flex-col items-center p-4">
+    <p class="section-header mb-1">${escHtml(label)}</p>
+    <svg viewBox="0 0 120 72" class="w-36">
+      <path d="M 12,60 A 48,48 0 0,1 108,60" fill="none" stroke="#f3f4f6" stroke-width="12" stroke-linecap="round"/>
+      <path d="M 12,60 A 48,48 0 0,1 108,60" fill="none" stroke="${color}" stroke-width="12" stroke-linecap="round"
+            stroke-dasharray="${filled.toFixed(1)} 300" style="transition:stroke-dasharray .6s ease"/>
+      <text x="60" y="54" text-anchor="middle" dominant-baseline="middle"
+            font-size="20" font-weight="700" fill="${textFill}"
+            font-family="system-ui,sans-serif">${escHtml(String(display))}</text>
+    </svg>
+    <p class="text-xs text-gray-400 text-center leading-tight mt-1">${escHtml(sub)}</p>
+  </div>`;
+}
+
+function buildDonutPanel(approved, needs_review, rejected) {
+  const total = approved + needs_review + rejected;
+  const r = 50, cx = 60, cy = 60, C = 2 * Math.PI * r; // C ≈ 314.16
+  const segments = [
+    { label:'Approved',      value: approved,     color:'#22c55e' },
+    { label:'Needs Review',  value: needs_review,  color:'#f59e0b' },
+    { label:'Rejected',      value: rejected,      color:'#ef4444' },
+  ];
+  let cumDeg = -90; // start at 12 o'clock
+  const arcs = segments.map(seg => {
+    if (!total) return '';
+    const len = (seg.value / total) * C;
+    const html = seg.value > 0
+      ? `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke-width="22"
+           stroke="${seg.color}"
+           stroke-dasharray="${len.toFixed(2)} ${(C - len).toFixed(2)}"
+           transform="rotate(${cumDeg} ${cx} ${cy})"/>`
+      : '';
+    cumDeg += (seg.value / (total || 1)) * 360;
+    return html;
+  }).join('');
+  const legend = segments.map(seg => `
+    <div class="flex items-center gap-2">
+      <div class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${seg.color}"></div>
+      <span class="text-xs text-gray-600 flex-1">${escHtml(seg.label)}</span>
+      <span class="text-xs font-bold text-gray-800">${seg.value}</span>
+      <span class="text-xs text-gray-400">${total > 0 ? Math.round(seg.value/total*100) : 0}%</span>
+    </div>`).join('');
+  return `<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+    <p class="section-header mb-4">Status Distribution</p>
+    <div class="flex items-center gap-6">
+      <div class="shrink-0">
+        <svg viewBox="0 0 120 120" class="w-32 h-32">
+          ${total > 0 ? arcs : `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#f3f4f6" stroke-width="22"/>`}
+          <text x="${cx}" y="${cy - 5}" text-anchor="middle" font-size="18" font-weight="700"
+                fill="#1f2937" font-family="system-ui,sans-serif">${total}</text>
+          <text x="${cx}" y="${cy + 12}" text-anchor="middle" font-size="9" fill="#9ca3af"
+                font-family="system-ui,sans-serif">QUESTIONS</text>
+        </svg>
+      </div>
+      <div class="flex-1 space-y-2.5">${legend}</div>
+    </div>
+  </div>`;
+}
+
+function buildDistributionPanel(agg) {
+  const total = Math.max(agg.total, 1);
+  const items = [
+    { label:'Approved',     value: agg.approved,     color:'#22c55e' },
+    { label:'Needs Review', value: agg.needs_review,  color:'#f59e0b' },
+    { label:'Rejected',     value: agg.rejected,      color:'#ef4444' },
+  ];
+  const maxVal = Math.max(...items.map(o => o.value), 1);
+  return `<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+    <p class="section-header mb-4">Review Breakdown</p>
+    <div class="space-y-3">
+      ${items.map(o => {
+        const w = Math.round(o.value / maxVal * 100);
+        return `<div>
+          <div class="flex justify-between mb-1">
+            <span class="text-xs font-medium text-gray-600">${escHtml(o.label)}</span>
+            <span class="text-xs text-gray-500">${o.value} &nbsp;(${Math.round(o.value/total*100)}%)</span>
+          </div>
+          <div class="bg-gray-100 rounded-full h-5 overflow-hidden">
+            ${o.value > 0
+              ? `<div class="h-5 rounded-full" style="width:${w}%;background:${o.color}"></div>`
+              : `<div class="h-5"></div>`}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    <p class="text-xs text-gray-400 mt-4 leading-snug">Add a "Has Issue" column to your input file for precision / recall metrics.</p>
+  </div>`;
+}
+
+function buildOutcomesPanel(agg) {
+  const total = Math.max(agg.total, 1);
+  const outcomes = [
+    { label:'Correct approvals', value: agg.TN, color:'#22c55e' },
+    { label:'Missed issues (FN)', value: agg.FN, color:'#f97316' },
+    { label:'Flagged for revision', value: agg.flagged_for_revision, color:'#eab308' },
+    { label:'Correctly rejected', value: agg.correctly_rejected, color:'#16a34a' },
+    { label:'False flags', value: agg.FP, color:'#ef4444' },
+  ].filter(o => o.value >= 0);
+  const maxVal = Math.max(...outcomes.map(o=>o.value), 1);
+
+  return `<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+    <p class="section-header mb-4">Question Outcomes <span class="font-normal text-gray-400">(${agg.total} total)</span></p>
+    <div class="space-y-3">
+      ${outcomes.map(o => {
+        const w = Math.round(o.value/maxVal*100);
+        return `<div class="flex items-center gap-3">
+          <span class="text-xs text-gray-500 w-40 shrink-0 text-right leading-tight">${escHtml(o.label)}</span>
+          <div class="flex-1 bg-gray-100 rounded-full h-6 overflow-hidden">
+            ${o.value>0?`<div class="h-6 rounded-full flex items-center px-2.5 transition-all" style="width:${w}%;background:${o.color}">
+              <span class="text-white text-xs font-bold">${o.value}</span></div>`:
+            `<div class="h-6 flex items-center px-2"><span class="text-gray-400 text-xs">0</span></div>`}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
+}
+
+function buildConfusionPanel(agg) {
+  return `<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+    <p class="section-header mb-4">Confusion Matrix</p>
+    <div class="grid grid-cols-3 gap-2 text-xs">
+      <div></div>
+      <div class="text-center text-gray-500 font-semibold py-2">Predicted: flag</div>
+      <div class="text-center text-gray-500 font-semibold py-2">Predicted: approve</div>
+      <div class="text-right text-gray-500 font-semibold flex items-center justify-end pr-2">Actual: problem</div>
+      <div class="cm-tp"><p class="text-2xl font-bold text-green-700">${agg.TP}</p><p class="text-green-600 mt-0.5">true positive</p></div>
+      <div class="cm-fn"><p class="text-2xl font-bold text-orange-700">${agg.FN}</p><p class="text-orange-600 mt-0.5">false negative</p></div>
+      <div class="text-right text-gray-500 font-semibold flex items-center justify-end pr-2">Actual: clean</div>
+      <div class="cm-fp"><p class="text-2xl font-bold text-red-700">${agg.FP}</p><p class="text-red-600 mt-0.5">false positive</p></div>
+      <div class="cm-tn"><p class="text-2xl font-bold text-green-700">${agg.TN}</p><p class="text-green-600 mt-0.5">true negative</p></div>
+    </div>
+    ${(agg.TP+agg.FP+agg.FN+agg.TN)>0?`<p class="text-xs text-gray-400 mt-3 text-center">${agg.TP+agg.FN} total problematic questions in dataset</p>`:''}
+  </div>`;
+}
+
+function buildInsightsPanel(precision, recall, fp, fn) {
+  const rows = [];
+  if (precision!=null && precision>=99.9)
+    rows.push(['success','✓','Perfect precision','Every flag the agent raises is valid. No reviewer time wasted on false alarms.']);
+  else if (precision!=null && precision<70)
+    rows.push(['warning','⚠','Low precision ('+precision+'%)',''+fp+' clean questions were incorrectly flagged. The agent is over-sensitive.']);
+  if (recall!=null && recall<50)
+    rows.push(['warning','⚠','Low recall ('+recall+'%)',''+fn+' questions with fixable issues slipped through as approved. The agent is conservative, not permissive.']);
+  if (recall!=null && recall<50 && fp===0)
+    rows.push(['info','ℹ','Flagging threshold too high','Minor issues appear to be below the agent\'s detection bar. Lowering the threshold would improve recall with minimal precision cost (baseline FP is 0).']);
+  if (recall!=null && recall>=80 && precision!=null && precision>=80)
+    rows.push(['success','✓','Good overall performance','The agent correctly handles the majority of questions (recall '+recall+'%, precision '+precision+'%).']);
+  if (!rows.length) return '';
+  const classMap = {success:'insight-success',warning:'insight-warning',info:'insight-info'};
+  const iconColor = {success:'#16a34a',warning:'#92400e',info:'#1e40af'};
+  return `<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+    <p class="section-header mb-4">Diagnostic Insights</p>
+    ${rows.map(([level,icon,title,body]) => `
+    <div class="insight-row ${classMap[level]}">
+      <span class="text-lg leading-none" style="color:${iconColor[level]}">${icon}</span>
+      <div><p class="text-sm font-semibold" style="color:${iconColor[level]}">${escHtml(title)}</p><p class="text-sm mt-0.5 opacity-80">${escHtml(body)}</p></div>
+    </div>`).join('')}
+  </div>`;
+}
+
+function buildErrorChart(topErrors) {
+  if (!topErrors.length) return '';
+  const maxVal = Math.max(...topErrors.map(e=>e.count), 1);
+  const colors = ['#6366f1','#8b5cf6','#a78bfa','#c4b5fd','#ddd6fe','#e0e7ff'];
+  return `<div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+    <p class="section-header mb-4">Top Error Types <span class="font-normal text-gray-400">(all runs)</span></p>
+    <div class="space-y-2.5">
+      ${topErrors.map((e,i) => {
+        const w = Math.round(e.count/maxVal*100);
+        const color = colors[Math.min(i, colors.length-1)];
+        return `<div class="flex items-center gap-3">
+          <span class="text-xs text-gray-600 w-44 shrink-0 text-right truncate" title="${escHtml(e.type)}">${escHtml(e.type)}</span>
+          <div class="flex-1 bg-gray-100 rounded-full h-5 overflow-hidden">
+            <div class="h-5 rounded-full flex items-center px-2.5" style="width:${w}%;background:${color}">
+              <span class="text-white text-xs font-semibold">${e.count}</span>
+            </div>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+  </div>`;
+}
+
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+function roundPct(v) { return Math.round(v*1000)/10; }
+function pctStr(n, total) { return total>0 ? `${Math.round((n||0)/total*100)}% of total` : '—'; }
+
+function escHtml(s) {
+  return String(s??'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function escAttr(s) { return String(s??'').replace(/'/g,"\\'").replace(/"/g,'&quot;'); }
+
+function newUpload() {
+  state.selectedFile = null; state.jobId = null; state.results = null;
+  state.expandedRows.clear();
+  fileInput.value = '';
+  dropLabel.textContent = 'Drop your Excel file here';
+  startBtn.disabled = true;
+  startBtn.classList.replace('bg-indigo-600','bg-gray-400');
+  startBtn.textContent = 'Start Review';
+  hideUploadError();
+  showView('upload');
+}
+
+function downloadExcel() { if (state.jobId) window.location.href=`/api/jobs/${state.jobId}/download`; }
+
+
+</script>
+</body>
+</html>
