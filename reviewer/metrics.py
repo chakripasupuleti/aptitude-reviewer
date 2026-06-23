@@ -14,7 +14,7 @@ from typing import Any, Dict, List
 _FLAG_STATUSES = {"rejected", "needs review"}
 _APPROVE_STATUSES = {"approved", "approved with minor fixes"}
 
-_FALSY  = {"no", "n", "false", "0", "", "nan", "none", "-"}
+_FALSY  = {"no", "n", "false", "0", "", "nan", "none", "-", "valid"}
 
 
 def _is_problem(ground_truth_value: Any) -> bool:
@@ -34,6 +34,50 @@ def _is_problem(ground_truth_value: Any) -> bool:
 
 def _is_flag(agent_status: str) -> bool:
     return agent_status.strip().lower() in _FLAG_STATUSES
+
+
+def _metrics_from_counts(
+    tp: int, fp: int, fn: int, tn: int, total: int, has_gt: bool,
+    flagged_for_revision: int = 0, correctly_rejected: int = 0,
+) -> Dict:
+    """Build the standard metrics dict from already-classified TP/FP/FN/TN counts."""
+    total_problems = tp + fn
+    total_clean = fp + tn
+    gt_total = tp + fp + fn + tn  # only GT-labelled rows — correct denominator for accuracy
+
+    precision = tp / (tp + fp) if (tp + fp) > 0 else None
+    recall = tp / (tp + fn) if (tp + fn) > 0 else None
+    f1 = (2 * precision * recall / (precision + recall)
+          if precision is not None and recall is not None and (precision + recall) > 0
+          else None)
+    accuracy = (tp + tn) / gt_total if gt_total > 0 else None
+
+    def _pct(v):
+        return round(v * 100, 1) if v is not None else None
+
+    insights = _build_insights(tp, fp, fn, precision, recall)
+
+    return {
+        "has_ground_truth": has_gt,
+        "total": total,
+        "total_problems": total_problems,
+        "total_clean": total_clean,
+        "TP": tp,
+        "FP": fp,
+        "FN": fn,
+        "TN": tn,
+        "flagged_for_revision": flagged_for_revision,
+        "correctly_rejected": correctly_rejected,
+        "correct_approvals": tn,
+        "missed_issues": fn,
+        "false_flags": fp,
+        "precision": _pct(precision),
+        "recall": _pct(recall),
+        "f1": round(2 * (precision or 0) * (recall or 0) / ((precision or 0) + (recall or 0)), 2)
+               if precision and recall else None,
+        "accuracy": _pct(accuracy),
+        "insights": insights,
+    }
 
 
 def compute_confusion_metrics(rows: List[Dict]) -> Dict:
@@ -79,44 +123,63 @@ def compute_confusion_metrics(rows: List[Dict]) -> Dict:
         else:
             tn += 1
 
-    total = len(rows)
-    total_problems = tp + fn
-    total_clean = fp + tn
-    gt_total = tp + fp + fn + tn  # only GT-labelled rows — correct denominator for accuracy
+    return _metrics_from_counts(tp, fp, fn, tn, len(rows), has_gt, flagged_for_revision, correctly_rejected)
 
-    precision = tp / (tp + fp) if (tp + fp) > 0 else None
-    recall = tp / (tp + fn) if (tp + fn) > 0 else None
-    f1 = (2 * precision * recall / (precision + recall)
-          if precision is not None and recall is not None and (precision + recall) > 0
-          else None)
-    accuracy = (tp + tn) / gt_total if gt_total > 0 else None
 
-    def _pct(v):
-        return round(v * 100, 1) if v is not None else None
+def compute_feedback_confusion_metrics(feedback_records: List[Dict]) -> Dict:
+    """Compute TP/FP/FN/TN from human Approve/Reject feedback on agent verdicts.
 
-    insights = _build_insights(tp, fp, fn, precision, recall)
+    The four cases, stated plainly:
+      - agent says Approved, reviewer clicks Approve  -> correct                  (TN)
+      - agent flags it (shows remarks), reviewer clicks Approve -> agent was right (TP)
+      - agent says Approved, reviewer clicks Reject    -> agent is wrong, missed it (FN)
+      - agent flags it, reviewer clicks Reject          -> agent is wrong, false flag (FP)
 
-    return {
-        "has_ground_truth": has_gt,
-        "total": total,
-        "total_problems": total_problems,
-        "total_clean": total_clean,
-        "TP": tp,
-        "FP": fp,
-        "FN": fn,
-        "TN": tn,
-        "flagged_for_revision": flagged_for_revision,
-        "correctly_rejected": correctly_rejected,
-        "correct_approvals": tn,
-        "missed_issues": fn,
-        "false_flags": fp,
-        "precision": _pct(precision),
-        "recall": _pct(recall),
-        "f1": round(2 * (precision or 0) * (recall or 0) / ((precision or 0) + (recall or 0)), 2)
-               if precision and recall else None,
-        "accuracy": _pct(accuracy),
-        "insights": insights,
-    }
+    Each feedback record (from the "Feedback" Google Sheet) has:
+      - "Job ID", "Question No": identify the reviewed question
+      - "Agent Status": what the agent decided (Rejected/Needs Review/Approved/...)
+      - "User Verdict": "approve" (agent's call was correct) or "reject" (it was wrong)
+
+    A question updated more than once is deduped to its latest submission
+    (records are assumed to be in chronological append order, as gspread returns them).
+
+    Mapping: agent flagged + approve -> TP, agent flagged + reject -> FP,
+             agent approved + approve -> TN, agent approved + reject -> FN.
+    """
+    latest: Dict[tuple, Dict] = {}
+    for rec in feedback_records:
+        key = (rec.get("Job ID"), rec.get("Question No"))
+        latest[key] = rec
+
+    tp = fp = fn = tn = 0
+    flagged_for_revision = 0
+    correctly_rejected = 0
+
+    for rec in latest.values():
+        status = str(rec.get("Agent Status", ""))
+        verdict = str(rec.get("User Verdict", "")).strip().lower()
+        if verdict not in {"approve", "reject"}:
+            continue
+
+        flagged = _is_flag(status)
+        agrees = verdict == "approve"
+
+        if flagged and agrees:
+            tp += 1
+            if status.strip().lower() == "needs review":
+                flagged_for_revision += 1
+            else:
+                correctly_rejected += 1
+        elif flagged and not agrees:
+            fp += 1
+        elif not flagged and agrees:
+            tn += 1
+        else:
+            fn += 1
+
+    return _metrics_from_counts(
+        tp, fp, fn, tn, len(latest), len(latest) > 0, flagged_for_revision, correctly_rejected
+    )
 
 
 def _build_insights(tp: int, fp: int, fn: int, precision, recall) -> List[Dict]:

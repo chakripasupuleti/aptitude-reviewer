@@ -37,6 +37,9 @@ def _content_is_math_like(content: str) -> bool:
     # Single-letter math variables: $N$, $k$, $x$
     if re.fullmatch(r"[a-zA-Z]", stripped):
         return True
+    # Ratio expressions like $3:4:5$, $5:9$, $7:2:3$
+    if re.search(r"\d:\d", stripped):
+        return True
     return False
 
 

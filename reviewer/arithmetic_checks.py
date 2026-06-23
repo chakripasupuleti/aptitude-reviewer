@@ -387,8 +387,8 @@ def _strip_latex(text: str) -> str:
     )
     # ^{exponent} or ^\circ — strip entirely (we don't check exponents)
     result = re.sub(r"\^(?:\{[^{}]*\}|\\[a-z]+|\w)", "", result)
-    # \text{...} — strip
-    result = re.sub(r"\\text\{[^{}]*\}", "", result)
+    # \text{...} — replace with placeholder so adjacent operators don't merge into **
+    result = re.sub(r"\\text\{[^{}]*\}", "X", result)
     # Surrounding $ ... $ delimiters
     result = re.sub(r"\$", " ", result)
     # Preserve arithmetic operators before generic command stripping
@@ -413,6 +413,9 @@ def check_arithmetic(row) -> List[ReviewIssue]:
     # Remove thousands separators from numbers (1,650 → 1650, 7,500 → 7500) so the
     # equality pattern doesn't truncate or backtrack at commas.
     normalized = re.sub(r"\b(\d{1,3}(?:,\d{3})+)\b", lambda m: m.group(0).replace(",", ""), normalized)
+    # Indian number format: 2,00,000 → 200000; 1,26,000 → 126000 (lakhs/crores use
+    # groups of 2 digits after the first group, then 3 at the end).
+    normalized = re.sub(r"\b(\d{1,2}(?:,\d{2})+,\d{3})\b", lambda m: m.group(0).replace(",", ""), normalized)
 
     issues.extend(_check_quantity_equalities(row, normalized))
     flow_issues, blocked_spans = _check_profit_percentage_flow(normalized)
@@ -483,6 +486,12 @@ def check_arithmetic(row) -> List[ReviewIssue]:
         # Skip integer division with remainder notation: "45/4 = 11 remainder 1" or "8/5 = 1 r 3"
         # Also covers "= 36 with a remainder of 3" phrasing.
         if re.match(r"\s+(?:(?:with\s+a?\s+)?remainder(?:\s+of)?\s*|r\s+)\d+\b", normalized[match.end():], re.IGNORECASE):
+            pos = match.end()
+            continue
+        # Skip sub-expressions that are operands in a larger equation (e.g. x * (1 - 0.15) = 595
+        # — the (1 - 0.15) sub-expression is preceded by * so it's not a standalone equality).
+        preceding = normalized[:match.start()].rstrip()
+        if preceding and preceding[-1] in {'+', '-', '*', '/'}:
             pos = match.end()
             continue
         expression = match.group(1).strip()

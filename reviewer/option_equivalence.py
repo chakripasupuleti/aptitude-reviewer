@@ -327,6 +327,9 @@ def check_duplicate_options(row) -> List[ReviewIssue]:
             parsed_i = parse_option_value(text_i)
             parsed_j = parse_option_value(text_j)
             if parsed_i is not None and parsed_j is not None and parsed_i.kind == parsed_j.kind and parsed_i.value == parsed_j.value:
+                # For ratios, different display text = simplified vs unsimplified = valid MCQ distractor
+                if parsed_i.kind == "ratio" and normalize_exact(text_i) != normalize_exact(text_j):
+                    continue
                 issues.append(
                     make_issue(
                         "Critical",

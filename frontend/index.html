@@ -138,6 +138,7 @@
       <div class="bg-white rounded-xl p-5 shadow-sm border border-yellow-100"><p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Needs Review</p><p id="stat-review" class="text-3xl font-bold text-yellow-600">-</p><p id="stat-review-pct" class="text-xs text-gray-400 mt-1">-</p></div>
       <div class="bg-white rounded-xl p-5 shadow-sm border border-red-100"><p class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Rejected</p><p id="stat-rejected" class="text-3xl font-bold text-red-600">-</p><p id="stat-rejected-pct" class="text-xs text-gray-400 mt-1">-</p></div>
     </div>
+    <div id="gt-banner" class="rounded-xl p-4 mb-6 hidden"></div>
     <div id="common-issues-box" class="bg-white rounded-xl p-5 shadow-sm border border-gray-100 mb-6 hidden">
       <p class="text-sm font-semibold text-gray-500 mb-3">Most common issues</p>
       <div id="common-issues-tags" class="flex flex-wrap gap-2"></div>
@@ -303,7 +304,28 @@ function renderResults() {
       `<span class="text-sm px-3 py-1 rounded-full border border-orange-200 bg-orange-50 text-orange-700">${escHtml(i.type)} <span class="font-semibold">${i.count}</span></span>`
     ).join('');
   }
+  renderGtBanner(d);
   renderQuestionList();
+}
+
+function renderGtBanner(d) {
+  const el = document.getElementById('gt-banner');
+  const m = d.metrics || {};
+  if (d.has_ground_truth && m.has_ground_truth) {
+    el.className = 'rounded-xl p-4 mb-6 bg-indigo-50 border border-indigo-200';
+    const parts = [
+      `Precision ${m.precision!=null?m.precision+'%':'—'}`,
+      `Recall ${m.recall!=null?m.recall+'%':'—'}`,
+      `F1 ${m.f1!=null?m.f1:'—'}`,
+      `TP ${m.TP||0} · FP ${m.FP||0} · FN ${m.FN||0} · TN ${m.TN||0}`,
+    ];
+    el.innerHTML = `<p class="text-sm font-semibold text-indigo-700">Ground truth detected — column "${escHtml(d.gt_column||'')}"</p>
+      <p class="text-xs text-indigo-600 mt-1">${parts.join(' &nbsp;|&nbsp; ')}</p>`;
+  } else {
+    el.className = 'rounded-xl p-4 mb-6 bg-gray-50 border border-gray-200';
+    el.innerHTML = `<p class="text-sm text-gray-500">No ground-truth column detected for this file — showing review verdicts only (no accuracy metrics for this run).</p>`;
+  }
+  el.classList.remove('hidden');
 }
 
 function pct(n, total) { return total>0 ? Math.round(n/total*100) : 0; }
@@ -542,11 +564,11 @@ function renderDashboard() {
   const data = state.dashboardData;
   const runs = data.runs || [];
   document.getElementById('dash-run-count').textContent = `${runs.length} run${runs.length!==1?'s':''}`;
-  renderOverviewTab(runs, data.top_errors || []);
+  renderOverviewTab(runs, data.top_errors || [], data.feedback_metrics || null);
 }
 
 // ── OVERVIEW ───────────────────────────────────────────────────────────────────
-function renderOverviewTab(runs, topErrors) {
+function renderOverviewTab(runs, topErrors, feedbackMetrics) {
   const el = document.getElementById('dash-overview');
   if (!runs.length) {
     el.innerHTML = `<div class="text-center py-16 text-gray-400">No run history found. Complete a review to see data here.</div>`;
@@ -576,11 +598,25 @@ function renderOverviewTab(runs, topErrors) {
     modelCounts[model].flagged += (r.needs_review||0) + (r.rejected||0);
   });
 
-  const precision = agg.TP+agg.FP>0 ? roundPct(agg.TP/(agg.TP+agg.FP)) : null;
-  const recall    = agg.TP+agg.FN>0 ? roundPct(agg.TP/(agg.TP+agg.FN)) : null;
-  const f1        = precision&&recall ? Math.round(2*precision*recall/(precision+recall))/100 : null;
-  const gt_total  = agg.TP+agg.FP+agg.FN+agg.TN;
-  const accuracy  = gt_total>0 ? roundPct((agg.TP+agg.TN)/gt_total) : null;
+  // Merge eval-file ground truth (agg) and human feedback (feedbackMetrics) into one
+  // combined accuracy picture. Confirmed live: the two sources never share a job ID,
+  // so plain addition does not double-count any question.
+  const combined = {
+    TP: agg.TP + (feedbackMetrics?.TP||0),
+    FP: agg.FP + (feedbackMetrics?.FP||0),
+    FN: agg.FN + (feedbackMetrics?.FN||0),
+    TN: agg.TN + (feedbackMetrics?.TN||0),
+    flagged_for_revision: agg.flagged_for_revision + (feedbackMetrics?.flagged_for_revision||0),
+    correctly_rejected: agg.correctly_rejected + (feedbackMetrics?.correctly_rejected||0),
+  };
+  const combinedTotal = combined.TP + combined.FP + combined.FN + combined.TN;
+  combined.total = combinedTotal;
+  combined.has_gt = combinedTotal > 0;
+  combined.precision = (combined.TP+combined.FP)>0 ? roundPct(combined.TP/(combined.TP+combined.FP)) : null;
+  combined.recall    = (combined.TP+combined.FN)>0 ? roundPct(combined.TP/(combined.TP+combined.FN)) : null;
+  combined.f1        = (combined.precision&&combined.recall) ? Math.round(2*combined.precision*combined.recall/(combined.precision+combined.recall))/100 : null;
+  combined.accuracy  = combinedTotal>0 ? roundPct((combined.TP+combined.TN)/combinedTotal) : null;
+  const coveragePct  = agg.total>0 ? Math.round(combinedTotal/agg.total*100) : 0;
 
   el.innerHTML = `
     <!-- Summary stat cards -->
@@ -591,30 +627,18 @@ function renderOverviewTab(runs, topErrors) {
       ${statCard('Flagged / Rejected', agg.needs_review + agg.rejected,   '#dc2626', pctStr(agg.needs_review+agg.rejected, agg.total))}
     </div>
 
-    <!-- Core Efficiency Metrics with gauges -->
-    ${agg.has_gt ? `
-    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-      <p class="section-header mb-4">Core Efficiency Metrics</p>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-        ${gaugeCard('Precision', precision, '#6366f1', precision!=null&&precision>=99.9?'Zero false flags':`${agg.FP} false flags`)}
-        ${gaugeCard('Recall',    recall,    '#f59e0b', recall!=null&&recall<50?`${agg.FN} issues missed`:'Issues caught')}
-        ${gaugeCard('F1 Score',  f1!=null?Math.round(f1*100):null, '#10b981', 'Harmonic mean', f1!=null?f1.toFixed(2):null)}
-        ${gaugeCard('Accuracy',  accuracy,  '#3b82f6', gt_total>0?`${agg.TP+agg.TN} of ${gt_total} GT rows correct`:'')}
-      </div>
-    </div>` : ''}
+    <!-- Review Accuracy: eval-file ground truth + your own Approve/Reject feedback, combined -->
+    ${combined.has_gt ? buildAccuracySection(
+      'Review Accuracy',
+      `Based on ${combinedTotal} of ${agg.total} total reviewed questions (${coveragePct}%) that have a known-correct answer — from pre-labeled eval files or your own Approve/Reject feedback. The rest haven't been given a known-correct label yet, so accuracy can't be measured for them. Give feedback on more questions to increase this coverage.`,
+      combined
+    ) : ''}
 
     <!-- Status donut + Question Outcomes SVG bars -->
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
       ${buildDonutPanel(agg.approved, agg.needs_review, agg.rejected)}
-      ${agg.has_gt ? buildOutcomesPanel(agg) : buildDistributionPanel(agg)}
+      ${combined.has_gt ? buildOutcomesPanel(combined) : buildDistributionPanel(agg)}
     </div>
-
-    <!-- Confusion Matrix + Diagnostic Insights -->
-    ${agg.has_gt ? `
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-      ${buildConfusionPanel(agg)}
-      ${buildInsightsPanel(precision, recall, agg.FP, agg.FN)}
-    </div>` : ''}
 
     <!-- Error Type SVG bar chart -->
     ${topErrors.length ? buildErrorChart(topErrors) : ''}
@@ -767,6 +791,30 @@ function buildConfusionPanel(agg) {
       <div class="cm-tn"><p class="text-2xl font-bold text-green-700">${agg.TN}</p><p class="text-green-600 mt-0.5">true negative</p></div>
     </div>
     ${(agg.TP+agg.FP+agg.FN+agg.TN)>0?`<p class="text-xs text-gray-400 mt-3 text-center">${agg.TP+agg.FN} total problematic questions in dataset</p>`:''}
+  </div>`;
+}
+
+// Shared layout for a titled accuracy block: caption + gauges + confusion matrix + insights.
+// Used twice on the dashboard, once per independent ground-truth source (eval files, human feedback)
+// so the two are visually distinct sections instead of looking like a duplicated panel.
+function buildAccuracySection(title, caption, m) {
+  const precision = m.precision, recall = m.recall, f1 = m.f1, accuracy = m.accuracy;
+  const gtTotal = (m.TP||0) + (m.FP||0) + (m.FN||0) + (m.TN||0);
+  return `<div class="space-y-6">
+    <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+      <p class="section-header mb-1">${escHtml(title)}</p>
+      <p class="text-xs text-gray-400 mb-4">${escHtml(caption)}</p>
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        ${gaugeCard('Precision', precision, '#6366f1', precision!=null&&precision>=99.9?'Zero false flags':`${m.FP||0} false flags`)}
+        ${gaugeCard('Recall',    recall,    '#f59e0b', recall!=null&&recall<50?`${m.FN||0} issues missed`:'Issues caught')}
+        ${gaugeCard('F1 Score',  f1!=null?Math.round(f1*100):null, '#10b981', 'Harmonic mean', f1!=null?f1.toFixed(2):null)}
+        ${gaugeCard('Accuracy',  accuracy,  '#3b82f6', gtTotal>0?`${(m.TP||0)+(m.TN||0)} of ${gtTotal} correct`:'')}
+      </div>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      ${buildConfusionPanel(m)}
+      ${buildInsightsPanel(precision, recall, m.FP, m.FN)}
+    </div>
   </div>`;
 }
 

@@ -27,6 +27,9 @@ def _content_is_math_like(content: str) -> bool:
     # Algebraic variable expressions like $5k$, $7k$, $3x$, $2n$ (age/algebra problems).
     if re.search(r"\d[a-zA-Z]|[a-zA-Z]\d", stripped):
         return True
+    # Ratio expressions like $3:4:5$, $5:9$, $7:2:3$
+    if re.search(r"\d:\d", stripped):
+        return True
     return False
 
 

@@ -26,14 +26,22 @@ from reviewer.llm_reasoning_checks import LLMReviewResult, run_llm_reasoning_bat
 from reviewer.constants import REQUIRED_COLUMNS, REVIEW_COLUMNS
 from reviewer.export import export_reviewed
 from reviewer.ingest import read_input
-from reviewer.metrics import compute_confusion_metrics
+from reviewer.metrics import compute_confusion_metrics, compute_feedback_confusion_metrics
 from reviewer.normalize import (
+    _compact,
     cell_text,
     missing_required_columns,
     normalize_columns,
     normalize_input_values,
 )
-from reviewer.sheets_logger import fetch_error_history, fetch_run_history, log_feedback, log_run, sheets_configured
+from reviewer.sheets_logger import (
+    fetch_error_history,
+    fetch_feedback_history,
+    fetch_run_history,
+    log_feedback,
+    log_run,
+    sheets_configured,
+)
 
 # ── FastAPI app ────────────────────────────────────────────────────────────────
 app = FastAPI(title="Aptitude Reviewer API", docs_url="/api/docs")
@@ -77,8 +85,13 @@ RUBRIC_MAP: Dict[str, set] = {
     "Duplicate": {"Duplicate Options"},
 }
 
-# Optional ground-truth column names accepted in the input file
-_GT_COLUMNS = {"Has Issue", "has issue", "Has_Issue", "Ground Truth", "Seeded Issue", "Seeded V2 Issue"}
+# Optional ground-truth column names accepted in the input file. Matched against
+# _compact(col) so case/spacing/punctuation variants (e.g. "HAS_ISSUE", "ground-truth",
+# "Seeded  Issue") are all recognized, the same way input columns like "Question" are.
+_GT_COLUMNS = {
+    _compact(name)
+    for name in ("Has Issue", "Ground Truth", "Seeded Issue", "Seeded V2 Issue", "Remarks")
+}
 
 
 def _compute_rubric(error_types_str: str) -> Dict[str, str]:
@@ -98,7 +111,7 @@ def _sno_display(value) -> str:
 def _detect_gt_column(df: pd.DataFrame) -> Optional[str]:
     """Return the ground-truth column name if present, else None."""
     for col in df.columns:
-        if col.strip() in _GT_COLUMNS:
+        if _compact(col) in _GT_COLUMNS:
             return col
     return None
 
@@ -156,6 +169,7 @@ def _run_job(job_id: str, input_path: str, output_path: str, use_llm: bool) -> N
         job["total"] = len(df)
         job["status"] = "running"
         job["has_ground_truth"] = gt_col is not None
+        job["gt_column"] = gt_col
 
         # ── Phase 1: deterministic V1 checks for every row ─────────────────────
         v1_data = []  # list of (label, row, v1_issues)
@@ -218,7 +232,7 @@ def _run_job(job_id: str, input_path: str, output_path: str, use_llm: bool) -> N
         rejected_count = sum(1 for s in statuses if s.lower() == "rejected")
         model_used = next((r["llm_model"] for r in row_results if r.get("llm_model")), "V1 only")
 
-        log_run(
+        job["logged_to_sheets"] = log_run(
             job_id=job_id,
             metrics=metrics,
             model=model_used,
@@ -336,6 +350,8 @@ async def get_job_results(job_id: str):
         "common_issues": [{"type": t, "count": c} for t, c in common],
         "rows": rows,
         "metrics": job.get("metrics"),
+        "has_ground_truth": job.get("has_ground_truth", False),
+        "gt_column": job.get("gt_column"),
     }
 
 
@@ -365,7 +381,12 @@ class FeedbackBody(BaseModel):
 @app.post("/api/jobs/{job_id}/feedback")
 async def submit_feedback(job_id: str, body: FeedbackBody):
     if job_id not in jobs:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(
+            status_code=404,
+            detail="This review session has expired (the server was restarted). "
+                   "Feedback cannot be saved for expired sessions. "
+                   "Please re-run the review to submit feedback.",
+        )
     job = jobs[job_id]
     if job["status"] != "done":
         raise HTTPException(status_code=400, detail="Job not finished yet")
@@ -419,6 +440,8 @@ async def get_dashboard_data():
     for jid, job in jobs.items():
         if job["status"] != "done":
             continue
+        if job.get("logged_to_sheets"):
+            continue  # already represented via sheet_runs below — avoid double-counting
         rows = job.get("rows", [])
         statuses = [r["agent_status"] for r in rows]
         approved = sum(1 for s in statuses if "approved" in s.lower())
@@ -482,16 +505,27 @@ async def get_dashboard_data():
     for jid, job in jobs.items():
         if job["status"] != "done":
             continue
+        if job.get("logged_to_sheets"):
+            continue  # already represented via fetch_error_history() above — avoid double-counting
         for r in job.get("rows", []):
             for et in r.get("error_types", []):
                 error_totals[et] += 1
 
     top_errors = [{"type": t, "count": c} for t, c in error_totals.most_common(15)]
 
+    # Human feedback (Approve/Reject) gives a second, independent accuracy signal —
+    # derived from real review verdicts rather than a pre-labeled ground-truth column.
+    feedback_metrics = None
+    if sheets_configured():
+        feedback_records = fetch_feedback_history()
+        if feedback_records:
+            feedback_metrics = compute_feedback_confusion_metrics(feedback_records)
+
     return {
         "runs": all_runs,
         "sheets_configured": sheets_configured(),
         "top_errors": top_errors,
+        "feedback_metrics": feedback_metrics,
     }
 
 

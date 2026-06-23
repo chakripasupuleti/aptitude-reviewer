@@ -185,6 +185,24 @@ def fetch_error_history() -> List[Dict]:
         return []
 
 
+def fetch_feedback_history() -> List[Dict]:
+    """Return all rows from the Feedback sheet as a list of dicts.
+
+    Returns [] if Sheets is not configured or fetch fails.
+    """
+    _, spreadsheet = _get_client()
+    if spreadsheet is None:
+        return []
+
+    try:
+        ws = spreadsheet.worksheet("Feedback")
+        records = ws.get_all_records()
+        return records
+    except Exception as exc:
+        logger.warning("Failed to fetch feedback history from Sheets: %s", exc)
+        return []
+
+
 def log_feedback(
     job_id: str,
     sno: str,
