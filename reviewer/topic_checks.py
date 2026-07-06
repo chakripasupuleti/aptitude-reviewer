@@ -4,6 +4,7 @@ from math import gcd
 from typing import Iterable, List, Optional, Sequence, Tuple
 
 from .constants import VALID_KEYS
+from .gender_relation_checks import KNOWN_FEMALE_NAMES, KNOWN_MALE_NAMES
 from .models import ReviewIssue, make_issue
 from .normalize import cell_text
 from .option_equivalence import match_answer_to_options
@@ -94,6 +95,25 @@ def _key_option_text(row) -> str:
     if key in VALID_KEYS:
         return cell_text(row, key)
     return ""
+
+
+_CARDINAL_WORDS_REVERSE = {v: k for k, v in CARDINAL_WORDS.items()}
+
+
+def _number_word_forms(n: int) -> List[str]:
+    """Return plausible spelled-out English word forms for a small integer.
+
+    Used so a digit-substring check (e.g. "35" in explanation) doesn't miss a
+    correct explanation that spells the number out instead ("thirty five").
+    """
+    if n in _CARDINAL_WORDS_REVERSE:
+        return [_CARDINAL_WORDS_REVERSE[n]]
+    tens, unit = (n // 10) * 10, n % 10
+    if tens >= 20 and tens in _CARDINAL_WORDS_REVERSE and unit in _CARDINAL_WORDS_REVERSE:
+        tens_word = _CARDINAL_WORDS_REVERSE[tens]
+        unit_word = _CARDINAL_WORDS_REVERSE[unit]
+        return [f"{tens_word} {unit_word}", f"{tens_word}-{unit_word}"]
+    return []
 
 
 def _clean_num(value: Fraction) -> str:
@@ -405,7 +425,14 @@ def check_students_below_above_count(row) -> List[ReviewIssue]:
     question = cell_text(row, "Question")
     explanation = cell_text(row, "Explanation")
     lower = question.lower()
-    if not re.search(r"how\s+many\s+students\s+are\s+(?:below|above|behind|ahead of|after|before)", lower):
+    # Capture the direction word from the actual question being asked ("how many
+    # students are ___"), not from the whole question text — a ranking question
+    # commonly states one direction as a given fact (e.g. "34 students are behind
+    # her") and asks about the other ("how many are ahead of her?"); scanning the
+    # whole text for both keyword sets would match both and silently pick the
+    # wrong formula.
+    ask_match = re.search(r"how\s+many\s+students\s+are\s+(below|above|behind|ahead of|after|before)", lower)
+    if not ask_match:
         return []
     total_match = re.search(r"class\s+of\s+(\d+)\s+students", lower)
     rank_match = re.search(r"(?:is|ranked|ranks?)\s+(\d+)(?:st|nd|rd|th)?\s+from\s+the\s+(top|bottom)", lower)
@@ -415,8 +442,9 @@ def check_students_below_above_count(row) -> List[ReviewIssue]:
     rank = int(rank_match.group(1))
     side = rank_match.group(2)
 
-    asks_below = any(term in lower for term in ["below", "behind", "after"])
-    asks_above = any(term in lower for term in ["above", "ahead of", "before"])
+    ask_word = ask_match.group(1)
+    asks_below = ask_word in {"below", "behind", "after"}
+    asks_above = ask_word in {"above", "ahead of", "before"}
     if side == "top" and asks_below:
         correct = total - rank
     elif side == "top" and asks_above:
@@ -470,7 +498,10 @@ def check_left_right_count_mismatch(row) -> List[ReviewIssue]:
 
     key = cell_text(row, "Key")
     matches = match_answer_to_options(correct_text, row)
-    if len(matches) == 1 and matches[0] == key and correct_text in explanation:
+    correct_stated = correct_text in explanation or any(
+        re.search(rf"\b{re.escape(word)}\b", lower_e) for word in _number_word_forms(correct)
+    )
+    if len(matches) == 1 and matches[0] == key and correct_stated:
         return []
 
     evidence = f"Question asks students to the right; explanation calculates students to the left. Correct right-side count is {total} - {position} = {correct_text}."
@@ -657,9 +688,16 @@ def check_speed_formula(row) -> List[ReviewIssue]:
     lower = question.lower()
     if "speed" not in lower:
         return []
-    match = re.search(r"covers?\s+(\d+(?:\.\d+)?)\s*km\s+in\s+(\d+(?:\.\d+)?)\s+hours?", lower)
-    if not match:
+    # Skip multi-leg / round-trip / average-speed questions: grabbing the first
+    # "covers X km in Y hours" clause and treating distance/time as the final
+    # answer is wrong when the actual answer is a combined average over two legs
+    # (e.g. average speed = 2ab/(a+b), not either leg's own speed).
+    if any(term in lower for term in ["average speed", "round trip", "return", "returns", "onward", "outward"]):
         return []
+    matches = list(re.finditer(r"covers?\s+(\d+(?:\.\d+)?)\s*km\s+in\s+(\d+(?:\.\d+)?)\s+hours?", lower))
+    if len(matches) != 1:
+        return []
+    match = matches[0]
     distance = Fraction(match.group(1))
     time = Fraction(match.group(2))
     if time == 0:
@@ -971,39 +1009,34 @@ def check_age_time_direction(row) -> List[ReviewIssue]:
     return []
 
 
-def check_ambiguous_difference_wording(row) -> List[ReviewIssue]:
-    question = cell_text(row, "Question")
-    lower = question.lower()
-    if re.search(r"difference\s+between\s+\d+(?:\.\d+)?\s+and\s+\d+(?:\.\d+)?\s+times\s+\d+(?:\.\d+)?", lower):
-        return [
-            make_issue(
-                "Major",
-                "Clarity Issue",
-                "Question",
-                question,
-                "The wording allows more than one mathematical interpretation. Specify whether to multiply before or after taking the difference.",
-                confidence="High",
-            )
-        ]
-    return []
-
-
 def check_pronoun_reference_ambiguity(row) -> List[ReviewIssue]:
     question = cell_text(row, "Question")
-    if re.search(r"\b[A-Z][a-z]+\s+told\s+[A-Z][a-z]+\s+that\s+(his|her)\b", question):
-        names = re.findall(r"\b[A-Z][a-z]+\b", question)
-        if len(names) >= 2:
-            return [
-                make_issue(
-                    "Major",
-                    "Clarity Issue",
-                    "Question",
-                    question,
-                    "The pronoun reference is unclear because it can refer to more than one person mentioned before it.",
-                    confidence="High",
-                )
-            ]
-    return []
+    match = re.search(r"\b([A-Z][a-z]+)\s+told\s+([A-Z][a-z]+)\s+that\s+(his|her)\b", question)
+    if not match:
+        return []
+    names = re.findall(r"\b[A-Z][a-z]+\b", question)
+    if len(names) < 2:
+        return []
+
+    # Not actually ambiguous if the two names have known, opposite genders — the
+    # pronoun (his/her) already disambiguates which one it refers to
+    # (e.g. "Ravi told Sita that her..." can only mean Sita).
+    name1, name2 = match.group(1).lower(), match.group(2).lower()
+    gender1 = "male" if name1 in KNOWN_MALE_NAMES else "female" if name1 in KNOWN_FEMALE_NAMES else None
+    gender2 = "male" if name2 in KNOWN_MALE_NAMES else "female" if name2 in KNOWN_FEMALE_NAMES else None
+    if gender1 and gender2 and gender1 != gender2:
+        return []
+
+    return [
+        make_issue(
+            "Major",
+            "Clarity Issue",
+            "Question",
+            question,
+            "The pronoun reference is unclear because it can refer to more than one person mentioned before it.",
+            confidence="High",
+        )
+    ]
 
 
 def check_two_item_total_cost(row) -> List[ReviewIssue]:
@@ -1397,7 +1430,6 @@ def check_topic_specific(row) -> List[ReviewIssue]:
 
     # Clarity / wording checks.
     issues.extend(check_age_time_direction(row))
-    issues.extend(check_ambiguous_difference_wording(row))
     issues.extend(check_pronoun_reference_ambiguity(row))
     issues.extend(check_two_item_total_cost(row))
     issues.extend(check_minor_label_mismatch(row))

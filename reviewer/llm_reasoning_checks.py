@@ -1,6 +1,6 @@
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Iterable, List, Mapping, Any, Optional
 
 from .arithmetic_checks import evaluate_expression
@@ -92,6 +92,9 @@ class LLMReviewResult:
     status: str
     error: str = ""
     model: str = ""
+    # Evidence strings of V1 "Data Mismatch" findings that V2 identified as
+    # false positives (e.g. a sentence adverb mistaken for a person's name).
+    v1_false_positive_evidence: List[str] = field(default_factory=list)
 
 
 def _stringify(value: Any) -> str:
@@ -246,6 +249,25 @@ def _normalize_issue(raw: dict) -> Optional[ReviewIssue]:
     )
 
 
+def _extract_v1_false_positives(raw: Any, v1_issues: Iterable[ReviewIssue]) -> List[str]:
+    """Return evidence strings V2 flagged as false positives, restricted to V1
+    "Data Mismatch" findings whose evidence exactly matches (scope guard so V2
+    can only veto this one fragile check, never other V1 categories)."""
+    if not isinstance(raw, list):
+        return []
+    data_mismatch_evidence = {
+        issue.evidence.strip().lower() for issue in v1_issues if issue.error_type == "Data Mismatch"
+    }
+    vetoed: List[str] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        evidence = str(entry.get("evidence", "")).strip()
+        if evidence and evidence.lower() in data_mismatch_evidence:
+            vetoed.append(evidence)
+    return vetoed
+
+
 def _dedupe_against_v1(v2_issues: List[ReviewIssue], v1_issues: Iterable[ReviewIssue]) -> List[ReviewIssue]:
     v1_text = "\n".join(
         f"{issue.error_type} {issue.field} {issue.evidence} {issue.reason}".lower() for issue in v1_issues
@@ -336,12 +358,14 @@ def run_llm_reasoning(
 
     deduped = _dedupe_against_v1(normalized, v1_list)
     cleaned = _postprocess_v2_issues(row=row, issues=deduped, v1_issues=v1_list)
+    v1_false_positives = _extract_v1_false_positives(parsed.get("v1_false_positives", []), v1_list)
 
     return LLMReviewResult(
         issues=cleaned,
         status="Success",
         error="",
         model=resolved_model,
+        v1_false_positive_evidence=v1_false_positives,
     )
 
 
@@ -411,7 +435,11 @@ def run_llm_reasoning_batch(
 
         deduped = _dedupe_against_v1(normalized, v1_issues)
         cleaned = _postprocess_v2_issues(row=row, issues=deduped, v1_issues=v1_issues)
-        results.append(LLMReviewResult(issues=cleaned, status="Success", error="", model=resolved_model))
+        v1_false_positives = _extract_v1_false_positives(item.get("v1_false_positives", []), v1_issues)
+        results.append(LLMReviewResult(
+            issues=cleaned, status="Success", error="", model=resolved_model,
+            v1_false_positive_evidence=v1_false_positives,
+        ))
 
     return results
 

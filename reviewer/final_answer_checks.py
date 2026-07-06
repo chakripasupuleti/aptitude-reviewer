@@ -209,6 +209,19 @@ def _check_conclusion_vs_computation(explanation: str) -> List[ReviewIssue]:
     if abs(conc_val - comp_val) < 0.01:
         return []
 
+    # The conclusion may state a quantity DERIVED from the last two computed
+    # values rather than literally restating the last one — e.g. "A's share = 40",
+    # "B's share = 60", "Hence, the difference between their shares is 20". Only
+    # flag when the conclusion matches neither the last value nor a simple
+    # sum/difference of the last two computed values.
+    if len(comp_matches) >= 2:
+        prev_val = _parse_numeric(comp_matches[-2].group(1).strip())
+        if prev_val is not None and (
+            abs(conc_val - abs(comp_val - prev_val)) < 0.01
+            or abs(conc_val - (comp_val + prev_val)) < 0.01
+        ):
+            return []
+
     return [
         make_issue(
             "Critical",
@@ -222,15 +235,19 @@ def _check_conclusion_vs_computation(explanation: str) -> List[ReviewIssue]:
 
 
 _COMPUTED_VAL_RE = re.compile(r"=\s*(-?\d{2,}(?:\.\d+)?)", re.IGNORECASE)
+_STANDALONE_VAL_RE = re.compile(r"(-?\d+(?:\.\d+)?)")
 
 
 def _check_rounding_mismatch(row, explanation: str) -> List[ReviewIssue]:
-    """Flag when an explanation rounds a computed value that is not present in any option.
+    """Flag when an explanation rounds a computed value and the rounded result
+    still does not match any option — i.e. rounding didn't actually fix anything.
 
     Only fires when the explanation contains an explicit 'Rounding to/off' phrase.
-    Finds the last computed value (≥2 digit integer part) that appears after '=' in the
-    body before the rounding phrase. Does not require end-of-line so 'per kg' suffixes
-    after the value (common in LaTeX-stripped lines) are handled correctly.
+    Ordinary legitimate rounding (e.g. compound interest = 16.67, rounded to the
+    nearest rupee = 17, where 17 is an option) must NOT be flagged — that is
+    standard practice, not an error. This only flags the case where neither the
+    raw computed value NOR its stated rounded result appears in any option,
+    meaning the explanation's answer is disconnected from the options entirely.
     """
     rounding_match = re.search(r"[Rr]ounding\s+(?:to|off)\b", explanation)
     if not rounding_match:
@@ -245,6 +262,13 @@ def _check_rounding_mismatch(row, explanation: str) -> List[ReviewIssue]:
     computed_val_str = pre_matches[-1].group(1).strip()
 
     if match_answer_to_options(computed_val_str, row):
+        return []
+
+    # Legitimate rounding case: the stated rounded result (in the text after the
+    # rounding phrase) matches an option. Only proceed to flag if it does not.
+    post_rounding = _strip_simple_latex(explanation[rounding_match.end():])
+    post_matches = list(_STANDALONE_VAL_RE.finditer(post_rounding))
+    if post_matches and match_answer_to_options(post_matches[-1].group(1), row):
         return []
 
     return [
@@ -384,13 +408,19 @@ def _check_body_time_vs_conclusion(explanation: str) -> List[ReviewIssue]:
     Requires an explicit '= N hours' so bare "A takes 10 hours" phrasing is not matched.
     """
     final_m = re.search(
-        r"(?:(?:hence|therefore|so),?\s+|\*{0,2}[Aa]nswer\s*:\*{0,2}\s*).*?(\d+)\s*hours?",
+        r"(?:(?:hence|therefore|so),?\s+|\*{0,2}[Aa]nswer\s*:\*{0,2}\s*)([^\n]*)",
         explanation,
         re.IGNORECASE | re.MULTILINE,
     )
     if not final_m:
         return []
-    final_hours = int(final_m.group(1))
+    # Use the LAST "N hours" mention within the conclusion line, not the first:
+    # a conclusion sentence may state an intermediate figure before the true
+    # final answer (e.g. "after working alone for 3 hours, the remaining time = 11 hours").
+    hour_matches = list(re.finditer(r"(\d+)\s*hours?", final_m.group(1), re.IGNORECASE))
+    if not hour_matches:
+        return []
+    final_hours = int(hour_matches[-1].group(1))
 
     body = explanation[: final_m.start()]
     body_clean = _strip_simple_latex(body)

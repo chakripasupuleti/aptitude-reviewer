@@ -229,6 +229,17 @@ _COMMON_WORDS = {
     "note", "here", "now", "then", "using", "applying",
     # Action words mistaken for names in interchange/swap questions
     "interchange", "interchanged", "swap", "swapped", "shift", "shifted",
+    # Sentence-starter adverbs/connectors that get capitalised mid-explanation
+    # but are not person names (root cause of "Initially ..." false positives)
+    "initially", "originally", "finally", "similarly", "likewise",
+    "consequently", "subsequently", "previously", "currently", "clearly",
+    "actually", "obviously", "certainly", "generally", "specifically",
+    "essentially", "basically", "particularly", "importantly",
+    "additionally", "furthermore", "moreover", "besides", "meanwhile",
+    "eventually", "immediately", "gradually", "firstly", "secondly",
+    "thirdly", "lastly", "suppose", "assume", "consider", "instead",
+    "still", "again", "further", "accordingly", "regardless",
+    "nevertheless", "nonetheless", "otherwise", "overall", "similarly",
 }
 
 
@@ -242,8 +253,15 @@ def _structural_names_from_text(text: str) -> set:
     names = set()
     for match in pattern.finditer(text):
         name = match.group(1)
-        if name.lower() not in _COMMON_WORDS:
-            names.add(name.lower())
+        lname = name.lower()
+        if lname in _COMMON_WORDS:
+            continue
+        # Sentence-starter adverbs (Initially, Similarly, Consequently, ...) are
+        # virtually always "-ly"; person names in these puzzles never are.
+        # This closes the whole word class instead of listing instances one by one.
+        if lname.endswith("ly") and len(lname) > 4:
+            continue
+        names.add(lname)
     return names
 
 

@@ -82,11 +82,48 @@ def _contains_blood_relation(text: str) -> bool:
     return any(re.search(rf"\b{re.escape(word)}\b", lower) for word in BLOOD_RELATION_WORDS)
 
 
+_COMMON_NON_NAME_WORDS = {
+    "the", "aptitude", "option", "hence", "therefore", "so",
+    # Question-starters: aptitude questions routinely begin a sentence with one
+    # of these, capitalizing them the same way a real name would be capitalized.
+    "what", "how", "who", "when", "where", "which", "why", "find", "given",
+    "also", "now", "then", "consider", "suppose", "since", "while", "after",
+    "before", "this", "that", "these", "those", "total", "rank", "position",
+    "here", "there", "note", "let", "in", "on", "at", "for", "with", "by",
+    "if", "an", "is", "are",
+}
+
+
 def _names(text: str) -> Set[str]:
-    ignored = {"The", "Aptitude", "Option", "Hence", "Therefore", "So"}
-    # Keep single-letter variables such as A, B, C, P, Q, R. These are common in
-    # blood-relation aptitude questions and were missed by the earlier checker.
-    return {name for name in re.findall(rf"\b{NAME_TOKEN}\b", text) if name not in ignored}
+    # Keep single-letter variables such as A, B, C, P, Q, R unconditionally — they
+    # are common in blood-relation aptitude questions and can't be told apart from
+    # the indefinite article "a" by casing alone.
+    names: Set[str] = set()
+    for token in re.findall(rf"\b{NAME_TOKEN}\b", text):
+        if len(token) == 1:
+            names.add(token)
+            continue
+        lower = token.lower()
+        if lower in _COMMON_NON_NAME_WORDS:
+            continue
+        # Sentence-starter adverbs (Initially, Similarly, ...) get capitalized
+        # mid-explanation but are not names — same rule used in data_mismatch_checks.py.
+        if lower.endswith("ly") and len(lower) > 4:
+            continue
+        names.add(token)
+    return names
+
+
+def _is_only_name_in(name: str, text: str) -> bool:
+    """True if `name` is the only person-name token found in `text` (case-insensitive).
+
+    Nearest-antecedent guard: a pronoun should only be attributed to a known-gendered
+    name when no other name is present that could be the real antecedent — e.g.
+    "Priya's brother Ravi says he is happy" — Ravi, not Priya, is the closer and
+    correct antecedent for "he", even though Priya is a known female name.
+    """
+    others = {n.lower() for n in _names(text)} - {name.lower()}
+    return not others
 
 
 def _explicit_gender_assertions(text: str):
@@ -264,21 +301,25 @@ def check_gender_relation(row) -> List[ReviewIssue]:
     for name in all_names:
         lower = name.lower()
         if lower in KNOWN_FEMALE_NAMES:
-            window = re.search(rf"\b{re.escape(name)}\b[^.?!]*(\bhe\b|\bhim\b|\bhis\b)", combined, flags=re.IGNORECASE)
+            window = re.search(rf"\b{re.escape(name)}\b([^.?!]*)(\bhe\b|\bhim\b|\bhis\b)", combined, flags=re.IGNORECASE)
             if window:
-                issues.append(
-                    make_issue(
-                        "Major",
-                        "Pronoun/Gender Error",
-                        "Question/Explanation",
-                        window.group(0),
-                        f"'{name}' is a female name, but a male pronoun (he/him/his) is used.",
-                        confidence="Medium",
+                if _is_only_name_in(name, window.group(1)):
+                    issues.append(
+                        make_issue(
+                            "Major",
+                            "Pronoun/Gender Error",
+                            "Question/Explanation",
+                            window.group(0),
+                            f"'{name}' is a female name, but a male pronoun (he/him/his) is used.",
+                            confidence="Medium",
+                        )
                     )
-                )
-            elif re.search(rf"\b{re.escape(name)}\b", question, re.IGNORECASE):
+                # else: a closer name appears between `name` and the pronoun — that
+                # name, not `name`, is the more likely antecedent. Do not flag.
+            elif re.search(rf"\b{re.escape(name)}\b", question, re.IGNORECASE) and _is_only_name_in(name, question):
                 # Cross-sentence: name and pronoun in separate sentences (e.g. "Priya is 5th. What is his rank?").
-                # Only fire when this is the sole known-gender name in the question.
+                # Only fire when this is the sole name of ANY kind in the question — if
+                # another name is present, it could be the pronoun's real antecedent.
                 question_known = [
                     n.lower() for n in _names(question)
                     if n.lower() in KNOWN_FEMALE_NAMES | KNOWN_MALE_NAMES
@@ -297,21 +338,25 @@ def check_gender_relation(row) -> List[ReviewIssue]:
                             )
                         )
         elif lower in KNOWN_MALE_NAMES:
-            window = re.search(rf"\b{re.escape(name)}\b[^.?!]*(\bshe\b|\bher\b|\bhers\b)", combined, flags=re.IGNORECASE)
+            window = re.search(rf"\b{re.escape(name)}\b([^.?!]*)(\bshe\b|\bher\b|\bhers\b)", combined, flags=re.IGNORECASE)
             if window:
-                issues.append(
-                    make_issue(
-                        "Major",
-                        "Pronoun/Gender Error",
-                        "Question/Explanation",
-                        window.group(0),
-                        f"'{name}' is a male name, but a female pronoun (she/her/hers) is used.",
-                        confidence="Medium",
+                if _is_only_name_in(name, window.group(1)):
+                    issues.append(
+                        make_issue(
+                            "Major",
+                            "Pronoun/Gender Error",
+                            "Question/Explanation",
+                            window.group(0),
+                            f"'{name}' is a male name, but a female pronoun (she/her/hers) is used.",
+                            confidence="Medium",
+                        )
                     )
-                )
-            elif re.search(rf"\b{re.escape(name)}\b", question, re.IGNORECASE):
+                # else: a closer name appears between `name` and the pronoun — that
+                # name, not `name`, is the more likely antecedent. Do not flag.
+            elif re.search(rf"\b{re.escape(name)}\b", question, re.IGNORECASE) and _is_only_name_in(name, question):
                 # Cross-sentence: name and pronoun in separate sentences (e.g. "Suresh is 25th. What is her rank?").
-                # Only fire when this is the sole known-gender name in the question.
+                # Only fire when this is the sole name of ANY kind in the question — if
+                # another name is present, it could be the pronoun's real antecedent.
                 question_known = [
                     n.lower() for n in _names(question)
                     if n.lower() in KNOWN_FEMALE_NAMES | KNOWN_MALE_NAMES

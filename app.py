@@ -55,6 +55,15 @@ def _build_result(row, v1_issues: List[ReviewIssue], llm_result: "LLMReviewResul
     llm_model_used = ""
 
     if llm_result is not None:
+        # V2 may veto specific V1 "Data Mismatch" findings it judged to be false
+        # positives (e.g. a sentence adverb mistaken for a person's name). Scoped
+        # narrowly by _extract_v1_false_positives; only applies on LLM success.
+        if llm_result.status == "Success" and llm_result.v1_false_positive_evidence:
+            vetoed = {e.strip().lower() for e in llm_result.v1_false_positive_evidence}
+            all_issues = [
+                i for i in all_issues
+                if not (i.error_type == "Data Mismatch" and i.evidence.strip().lower() in vetoed)
+            ]
         all_issues.extend(llm_result.issues)
         llm_status = llm_result.status
         llm_error = llm_result.error

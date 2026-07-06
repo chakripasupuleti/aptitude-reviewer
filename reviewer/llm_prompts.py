@@ -122,8 +122,35 @@ ALLOWED_JSON_SCHEMA = """{
       "suggested_fix": "short correction only if certain; for Key Mismatch use exactly Option A/B/C/D; otherwise empty string",
       "confidence": "High | Medium | Low"
     }
+  ],
+  "v1_false_positives": [
+    {
+      "evidence": "exact copy of the evidence text from the V1 finding being vetoed",
+      "reason": "why this V1 'Data Mismatch' finding is wrong"
+    }
   ]
 }"""
+
+V1_DATA_MISMATCH_VETO_RULE = """V1 false-positive review (Data Mismatch only):
+The V1 findings list may include an error_type "Data Mismatch" that mistakes a plain word for a
+person's name because it appears capitalized near a rank/position phrase (e.g. "Initially, Raj is
+5th from the left" — V1 sometimes wrongly treats "Initially" as an unrecognised person name).
+Common culprits: sentence-starter adverbs (Initially, Finally, Similarly, Consequently, ...),
+ordinals used as connectors (First, Second, Third, ...), or step/case labels (Step, Case, Solution).
+
+For each V1 finding with error_type "Data Mismatch", decide whether it is a GENUINE mismatch or a
+V1 false positive:
+- GENUINE (do NOT veto): the explanation swaps two people's names or positions that both appear in
+  the question (e.g. question says Roshini, explanation says Raji), or states a numeric rank/position
+  for a person that contradicts the question (e.g. question says Raj is 5th from the left, explanation
+  says Raj is 8th from the left), or mismatches a direction/gender label between question and explanation.
+- FALSE POSITIVE (veto it): the flagged word is not actually a person's name at all — it is a common
+  word, connector, adverb, ordinal, or label that happens to be capitalized.
+
+If a finding is a false positive, add it to the top-level "v1_false_positives" array, copying its
+"evidence" text EXACTLY as shown in the V1 findings JSON. If none, return an empty array. Never veto a
+genuine mismatch just because you would have phrased the evidence differently.
+"""
 
 
 RUBRIC_GUIDANCE = """V2 rubric and classification rules:
@@ -206,6 +233,8 @@ The deterministic V1 reviewer has already checked each question for required fie
 
 {RUBRIC_GUIDANCE}
 
+{V1_DATA_MISMATCH_VETO_RULE}
+
 Decision standard for EACH question:
 - Clear material issue -> return the issue with evidence.
 - Valid under standard classroom convention and key/explanation are consistent -> return empty issues array.
@@ -215,11 +244,11 @@ Return a JSON array of exactly {n} objects, one per question, in the SAME ORDER 
 
 Return format:
 [
-  {{"sno": "<question number>", "issues": [<issue objects>]}},
+  {{"sno": "<question number>", "issues": [<issue objects>], "v1_false_positives": [<veto objects>]}},
   ...
 ]
 
-Each issue must use this exact schema:
+Each object must use this exact schema:
 {ALLOWED_JSON_SCHEMA}
 
 Now review these {n} questions:
@@ -255,6 +284,8 @@ V1 findings:
 
 {RUBRIC_GUIDANCE}
 
+{V1_DATA_MISMATCH_VETO_RULE}
+
 Decision standard:
 - Clear material issue -> return the issue with evidence.
 - Valid under standard classroom convention and key/explanation are consistent -> return {{"issues": []}}.
@@ -264,5 +295,5 @@ Return JSON in this exact format:
 {ALLOWED_JSON_SCHEMA}
 
 If no additional issue is found, return:
-{{"issues": []}}
+{{"issues": [], "v1_false_positives": []}}
 """

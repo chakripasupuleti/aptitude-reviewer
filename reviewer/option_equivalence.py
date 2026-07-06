@@ -143,6 +143,11 @@ def parse_currency(text: str) -> Optional[ParsedValue]:
     raw = str(text or "").strip()
     raw = raw.strip(".;,")
     raw = re.sub(r"\s+", " ", raw)
+    # Indian lakh/crore grouping first: ₹1,23,456 → ₹123456. Must run before the
+    # Western thousands-separator pass below, which can partially match inside an
+    # Indian-grouped number and corrupt it if applied first (same failure mode as
+    # the Western/Indian ordering bug fixed in arithmetic_checks.py).
+    raw = re.sub(r"\b(\d{1,2}(?:,\d{2})+,\d{3})\b", lambda m: m.group(0).replace(",", ""), raw)
     # Strip thousands-separator commas: ₹12,000 → ₹12000
     raw = re.sub(r"(?<=\d),(?=\d{3}\b)", "", raw)
 
@@ -272,6 +277,23 @@ def parse_option_value(text: str) -> Optional[ParsedValue]:
     return None
 
 
+def _parsed_values_equal(left: ParsedValue, right: ParsedValue) -> bool:
+    """True if two already-parsed option values represent the same amount.
+
+    Handles same-kind equality plus the cross-type case: a plain number matches
+    a currency of the same amount (e.g. "12000" == "₹12,000" == "₹1,23,456"-style
+    Indian grouping). Shared by values_equivalent() and check_duplicate_options()
+    so both apply the same equivalence rule.
+    """
+    if left.kind == right.kind and left.value == right.value:
+        return True
+    if {left.kind, right.kind} == {"number", "currency"}:
+        num_p = left if left.kind == "number" else right
+        cur_p = left if left.kind == "currency" else right
+        return num_p.value == cur_p.value[1]
+    return False
+
+
 def values_equivalent(left: str, right: str) -> bool:
     if normalize_exact(left) == normalize_exact(right):
         return True
@@ -279,14 +301,7 @@ def values_equivalent(left: str, right: str) -> bool:
     right_parsed = parse_option_value(right)
     if left_parsed is None or right_parsed is None:
         return False
-    if left_parsed.kind == right_parsed.kind and left_parsed.value == right_parsed.value:
-        return True
-    # Cross-type: plain number matches currency of same amount (e.g. "12000" == "₹12,000")
-    if {left_parsed.kind, right_parsed.kind} == {"number", "currency"}:
-        num_p = left_parsed if left_parsed.kind == "number" else right_parsed
-        cur_p = left_parsed if left_parsed.kind == "currency" else right_parsed
-        return num_p.value == cur_p.value[1]
-    return False
+    return _parsed_values_equal(left_parsed, right_parsed)
 
 
 def match_answer_to_options(answer_text: str, row) -> List[str]:
@@ -326,7 +341,7 @@ def check_duplicate_options(row) -> List[ReviewIssue]:
 
             parsed_i = parse_option_value(text_i)
             parsed_j = parse_option_value(text_j)
-            if parsed_i is not None and parsed_j is not None and parsed_i.kind == parsed_j.kind and parsed_i.value == parsed_j.value:
+            if parsed_i is not None and parsed_j is not None and _parsed_values_equal(parsed_i, parsed_j):
                 # For ratios, different display text = simplified vs unsimplified = valid MCQ distractor
                 if parsed_i.kind == "ratio" and normalize_exact(text_i) != normalize_exact(text_j):
                     continue

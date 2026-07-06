@@ -410,12 +410,16 @@ def check_arithmetic(row) -> List[ReviewIssue]:
     normalized = normalized.replace("\\times", "*").replace("\\div", "/")
     # Normalize Unicode minus variants to ASCII hyphen so equality patterns match correctly
     normalized = normalized.replace("−", "-").replace("–", "-").replace("—", "-")
+    # Indian number format: 2,00,000 → 200000; 1,26,000 → 126000 (lakhs/crores use
+    # groups of 2 digits after the first group, then 3 at the end). This must run
+    # BEFORE the Western thousands-separator pass below: that pattern's word-boundary
+    # match can partially match inside an Indian-grouped number (e.g. it grabs the
+    # "00,000" tail of "1,00,000"), leaving a stray comma that then no longer fits
+    # the Indian shape and silently truncates the parsed value (1,00,000 -> "1").
+    normalized = re.sub(r"\b(\d{1,2}(?:,\d{2})+,\d{3})\b", lambda m: m.group(0).replace(",", ""), normalized)
     # Remove thousands separators from numbers (1,650 → 1650, 7,500 → 7500) so the
     # equality pattern doesn't truncate or backtrack at commas.
     normalized = re.sub(r"\b(\d{1,3}(?:,\d{3})+)\b", lambda m: m.group(0).replace(",", ""), normalized)
-    # Indian number format: 2,00,000 → 200000; 1,26,000 → 126000 (lakhs/crores use
-    # groups of 2 digits after the first group, then 3 at the end).
-    normalized = re.sub(r"\b(\d{1,2}(?:,\d{2})+,\d{3})\b", lambda m: m.group(0).replace(",", ""), normalized)
 
     issues.extend(_check_quantity_equalities(row, normalized))
     flow_issues, blocked_spans = _check_profit_percentage_flow(normalized)

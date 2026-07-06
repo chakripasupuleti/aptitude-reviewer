@@ -157,10 +157,31 @@ _GENDERED_WORDS_ALL = {
 }
 
 
+_EVIDENCE_NON_NAME_WORDS = {
+    "the", "explanation", "question", "evidence", "since", "given", "hence",
+    "therefore", "here", "note", "consider", "this", "that", "assumes",
+    "states", "identifies", "concludes", "in", "a", "an",
+}
+
+
 def _extract_claimed_person_name(issue: ReviewIssue) -> Optional[str]:
-    """Return the name of the person whose gender the issue is asserting."""
-    match = re.match(r"\b([A-Z][a-z]+)\b", issue.evidence)
-    return match.group(1) if match else None
+    """Return the name of the person whose gender the issue is asserting.
+
+    Scans the whole evidence string rather than anchoring to its first word:
+    LLM-produced evidence often doesn't lead with the name (e.g. "The explanation
+    assumes Priya is male..."), and anchoring to position 0 would misidentify
+    "The" as the claimed name, which then silently breaks the caller's
+    gender-suppression lookup downstream.
+    """
+    for match in re.finditer(r"\b([A-Z][a-z]+)\b", issue.evidence):
+        candidate = match.group(1)
+        lower = candidate.lower()
+        if lower in _EVIDENCE_NON_NAME_WORDS:
+            continue
+        if lower.endswith("ly") and len(lower) > 4:
+            continue
+        return candidate
+    return None
 
 
 def _question_explicitly_genders_person(question_lower: str, name: str) -> bool:
